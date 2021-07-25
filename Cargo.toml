@@ -1,0 +1,8 @@
+[package]
+name = "recfs"
+version = "0.1.0"
+edition = "2018"
+authors = ["myl7 <myl@myl.moe>"]
+license = "MIT"
+
+[dependencies]
