@@ -73,3 +73,21 @@ impl RecClient {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[test]
+    fn test_list() {
+        let client = RecClient::new(env::var("AUTH_TOKEN").unwrap().to_string());
+        let items = client.list(Fid::root()).unwrap();
+        for item in items {
+            if let FileType::Directory = item.ftype {
+                client.list(item.fid).unwrap();
+                break;
+            }
+        }
+    }
+}
