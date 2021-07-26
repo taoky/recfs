@@ -1,5 +1,7 @@
 use super::{filename, RecClient, RecRes};
+use crate::client::filetype;
 use crate::fid::Fid;
+use fuse_mt::FileType;
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::str::FromStr;
@@ -24,29 +26,12 @@ struct RecListData {
     ftype: String,
 }
 
-pub enum RecListItemType {
-    File,
-    Folder,
-}
-
-impl FromStr for RecListItemType {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "folder" => Ok(Self::Folder),
-            "file" => Ok(Self::File),
-            _ => Err(anyhow::Error::msg("Invalid type ".to_owned() + s)),
-        }
-    }
-}
-
 pub struct RecListItem {
     pub bytes: usize,
     pub name: String,
     pub hash: String,
     pub fid: Fid,
-    pub ftype: RecListItemType,
+    pub ftype: FileType,
 }
 
 impl TryFrom<RecListData> for RecListItem {
@@ -58,7 +43,7 @@ impl TryFrom<RecListData> for RecListItem {
             name: filename(data.name, data.file_ext),
             hash: data.hash,
             fid: Fid::from_str(data.number.as_str())?,
-            ftype: RecListItemType::from_str(data.ftype.as_str())?,
+            ftype: filetype(data.ftype.as_str())?,
         })
     }
 }

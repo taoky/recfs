@@ -1,5 +1,6 @@
-mod list;
+pub mod list;
 
+use fuse_mt::FileType;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 
@@ -28,5 +29,13 @@ pub fn filename(name: String, ext: String) -> String {
         name
     } else {
         format!("{}.{}", name, ext)
+    }
+}
+
+pub fn filetype(ftype: &str) -> anyhow::Result<FileType> {
+    match ftype {
+        "folder" => Ok(FileType::Directory),
+        "file" => Ok(FileType::RegularFile),
+        _ => Err(anyhow::Error::msg("Unknown file type ".to_owned() + ftype)),
     }
 }
