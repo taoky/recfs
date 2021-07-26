@@ -3,6 +3,7 @@ use crate::client::filetype;
 use crate::fid::Fid;
 use fuse_mt::FileType;
 use serde::Deserialize;
+use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::FromStr;
 
@@ -14,7 +15,7 @@ struct RecListEntity {
 #[allow(dead_code)]
 #[derive(Deserialize)]
 struct RecListData {
-    bytes: usize,
+    bytes: Value,
     file_ext: String,
     file_type: String,
     hash: String,
@@ -39,7 +40,11 @@ impl TryFrom<RecListData> for RecListItem {
 
     fn try_from(data: RecListData) -> Result<Self, Self::Error> {
         Ok(Self {
-            bytes: data.bytes,
+            bytes: match data.bytes {
+                Value::String(_) => 0,
+                Value::Number(i) => i.as_u64().unwrap() as usize,
+                v => return Err(anyhow::Error::msg(format!("Invalid bytes field: {}", v))),
+            },
             name: filename(data.name, data.file_ext),
             hash: data.hash,
             fid: Fid::from_str(data.number.as_str())?,
