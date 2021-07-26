@@ -13,12 +13,12 @@ fn main() {
     let args = env::args_os().collect::<Vec<OsString>>();
     if args.len() != 3 {
         println!(
-            "usage: {} <target> <mountpoint>",
+            "usage: {} <mountpoint> <token>",
             env::args().next().unwrap()
         );
         exit(-1);
     }
-    let fs = RecFs::new("token".to_owned());
+    let fs = RecFs::new(args[2].to_string_lossy().to_string());
     let fuse_args = vec![OsStr::new("-o"), OsStr::new("auto_unmount")];
-    mount(FuseMT::new(fs, 1), &args[2], &fuse_args).unwrap();
+    mount(FuseMT::new(fs, 1), &args[1], &fuse_args).unwrap();
 }
