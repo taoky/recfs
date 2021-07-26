@@ -56,7 +56,9 @@ impl RecClient {
             .get(url)
             .header("x-auth-token", self.auth_token.as_str())
             .send()?;
-        let body = res.json::<RecRes<RecListEntity>>()?;
+        let body = serde_json::from_str::<RecRes<RecListEntity>>(
+            res.text()?.trim_start_matches("\u{feff}"),
+        )?;
         if body.status_code != 200 {
             Err(anyhow::Error::msg(format!(
                 "Status code {}",
