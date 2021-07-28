@@ -1,7 +1,7 @@
 use crate::client::RecClient;
 use crate::fid::Fid;
 use crate::fidmap::FidMap;
-use fuse_mt::{DirectoryEntry, FilesystemMT, RequestInfo, ResultOpen, ResultReaddir};
+use fuse_mt::{DirectoryEntry, FilesystemMT, RequestInfo, ResultEntry, ResultOpen, ResultReaddir};
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsString;
 use std::path::Path;
@@ -22,19 +22,21 @@ impl RecFs {
 }
 
 impl FilesystemMT for RecFs {
+    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
+        let fid = if let Some(fh) = fh {
+            self.get_fid(fh)?
+        } else {
+            self.req_fid(path)?
+        };
+    }
+
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
         let fid = self.req_fid(path)?;
         Ok((self.fid_map.write().unwrap().borrow_mut().set(fid), 0))
     }
 
     fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
-        let fid = self
-            .fid_map
-            .read()
-            .unwrap()
-            .borrow()
-            .get(fh)
-            .ok_or(libc::EBADF)?;
+        let fid = self.get_fid(fh)?;
         let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
         Ok(items
             .into_iter()
@@ -58,5 +60,15 @@ impl RecFs {
             }
         }
         Ok(fid)
+    }
+
+    fn get_fid(&self, fh: u64) -> Result<Fid, libc::c_int> {
+        Ok(self
+            .fid_map
+            .read()
+            .unwrap()
+            .borrow()
+            .get(fh)
+            .ok_or(libc::EBADF)?)
     }
 }
