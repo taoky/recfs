@@ -23,15 +23,7 @@ impl RecFs {
 
 impl FilesystemMT for RecFs {
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-        let mut fid = Fid::root();
-        for c in path.canonicalize().unwrap().components().skip(1) {
-            let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
-            let s = c.as_os_str().to_string_lossy();
-            match items.iter().find(|i| i.name == s) {
-                Some(item) => fid = item.fid,
-                None => return Err(libc::ENOENT),
-            }
-        }
+        let fid = self.req_fid(path)?;
         Ok((self.fid_map.write().unwrap().borrow_mut().set(fid), 0))
     }
 
@@ -51,5 +43,20 @@ impl FilesystemMT for RecFs {
                 kind: i.ftype,
             })
             .collect())
+    }
+}
+
+impl RecFs {
+    fn req_fid(&self, path: &Path) -> Result<Fid, libc::c_int> {
+        let mut fid = Fid::root();
+        for c in path.canonicalize().unwrap().components().skip(1) {
+            let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
+            let s = c.as_os_str().to_string_lossy();
+            match items.iter().find(|i| i.name == s) {
+                Some(item) => fid = item.fid,
+                None => return Err(libc::ENOENT),
+            }
+        }
+        Ok(fid)
     }
 }
