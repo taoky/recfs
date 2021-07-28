@@ -31,8 +31,15 @@ impl FilesystemMT for RecFs {
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
-        let fid = self.req_fid(path)?;
-        Ok((self.fid_map.write().unwrap().borrow_mut().set(fid), 0))
+        let (fid, parent_fid) = self.req_fid(path)?;
+        Ok((
+            self.fid_map
+                .write()
+                .unwrap()
+                .borrow_mut()
+                .set(fid, parent_fid),
+            0,
+        ))
     }
 
     fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
@@ -49,17 +56,21 @@ impl FilesystemMT for RecFs {
 }
 
 impl RecFs {
-    fn req_fid(&self, path: &Path) -> Result<Fid, libc::c_int> {
+    fn req_fid(&self, path: &Path) -> Result<(Fid, Option<Fid>), libc::c_int> {
+        let mut parent_fid = None;
         let mut fid = Fid::root();
         for c in path.canonicalize().unwrap().components().skip(1) {
             let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
             let s = c.as_os_str().to_string_lossy();
             match items.iter().find(|i| i.name == s) {
-                Some(item) => fid = item.fid,
+                Some(item) => {
+                    parent_fid = Some(fid);
+                    fid = item.fid;
+                }
                 None => return Err(libc::ENOENT),
             }
         }
-        Ok(fid)
+        Ok((fid, parent_fid))
     }
 
     fn get_fid(&self, fh: u64) -> Result<Fid, libc::c_int> {

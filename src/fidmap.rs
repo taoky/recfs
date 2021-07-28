@@ -1,14 +1,17 @@
 use crate::fid::Fid;
 use bimap::BiBTreeMap;
+use std::collections::HashMap;
 
 pub struct FidMap {
     map: BiBTreeMap<u64, Fid>,
+    parent_map: HashMap<Fid, Option<Fid>>,
 }
 
 impl FidMap {
     pub fn new() -> Self {
         Self {
             map: BiBTreeMap::new(),
+            parent_map: HashMap::new(),
         }
     }
 
@@ -16,12 +19,17 @@ impl FidMap {
         self.map.get_by_left(&fh).cloned()
     }
 
-    pub fn set(&mut self, fid: Fid) -> u64 {
+    pub fn get_parent(&self, fid: Fid) -> Option<Option<Fid>> {
+        self.parent_map.get(&fid).cloned()
+    }
+
+    pub fn set(&mut self, fid: Fid, parent_fid: Option<Fid>) -> u64 {
         match self.map.get_by_right(&fid) {
             Some(&fh) => fh,
             None => {
                 let fh = self.next_fh();
                 self.map.insert(fh, fid);
+                self.parent_map.insert(fid, parent_fid);
                 fh
             }
         }
