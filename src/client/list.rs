@@ -1,11 +1,13 @@
 use super::{filename, RecClient, RecRes};
 use crate::client::filetype;
 use crate::fid::Fid;
+use chrono::prelude::*;
 use fuse_mt::FileType;
 use serde::Deserialize;
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::FromStr;
+use time::Timespec;
 
 #[derive(Deserialize)]
 struct RecListEntity {
@@ -33,6 +35,7 @@ pub struct RecListItem {
     pub hash: Option<String>,
     pub fid: Fid,
     pub ftype: FileType,
+    pub time_updated: Timespec,
 }
 
 impl RecListItem {
@@ -43,6 +46,7 @@ impl RecListItem {
             hash: None,
             fid: Fid::root(),
             ftype: FileType::Directory,
+            time_updated: Timespec::new(0, 0),
         }
     }
 }
@@ -51,6 +55,9 @@ impl TryFrom<RecListData> for RecListItem {
     type Error = anyhow::Error;
 
     fn try_from(data: RecListData) -> Result<Self, Self::Error> {
+        let time = FixedOffset::west(8)
+            .datetime_from_str(data.last_update_date.as_str(), "%Y-%m-%d %H:%M:%S")?
+            .naive_utc();
         Ok(Self {
             bytes: match data.bytes {
                 Value::String(_) => 0,
@@ -65,6 +72,7 @@ impl TryFrom<RecListData> for RecListItem {
             },
             fid: Fid::from_str(data.number.as_str())?,
             ftype: filetype(data.ftype.as_str())?,
+            time_updated: Timespec::new(time.timestamp(), time.timestamp_subsec_nanos() as i32),
         })
     }
 }

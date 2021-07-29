@@ -3,8 +3,7 @@ use crate::client::RecClient;
 use crate::fid::Fid;
 use crate::fidmap::FidMap;
 use fuse_mt::{
-    DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo, ResultEntry, ResultOpen,
-    ResultReaddir,
+    DirectoryEntry, FileAttr, FilesystemMT, RequestInfo, ResultEntry, ResultOpen, ResultReaddir,
 };
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsString;
@@ -37,8 +36,8 @@ impl FilesystemMT for RecFs {
         let attr = FileAttr {
             size: item.bytes as u64,
             blocks: 1,
-            atime: Timespec::new(0, 0),
-            mtime: Timespec::new(0, 0),
+            atime: item.time_updated,
+            mtime: item.time_updated,
             ctime: Timespec::new(0, 0),
             crtime: Timespec::new(0, 0),
             kind: item.ftype,
