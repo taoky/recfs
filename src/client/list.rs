@@ -30,9 +30,21 @@ struct RecListData {
 pub struct RecListItem {
     pub bytes: usize,
     pub name: String,
-    pub hash: String,
+    pub hash: Option<String>,
     pub fid: Fid,
     pub ftype: FileType,
+}
+
+impl RecListItem {
+    pub fn root() -> Self {
+        Self {
+            bytes: 0,
+            name: "".to_string(),
+            hash: None,
+            fid: Fid::root(),
+            ftype: FileType::Directory,
+        }
+    }
 }
 
 impl TryFrom<RecListData> for RecListItem {
@@ -46,7 +58,11 @@ impl TryFrom<RecListData> for RecListItem {
                 v => return Err(anyhow::Error::msg(format!("Invalid bytes field: {}", v))),
             },
             name: filename(data.name, data.file_ext),
-            hash: data.hash,
+            hash: if data.hash == "" {
+                None
+            } else {
+                Some(data.hash)
+            },
             fid: Fid::from_str(data.number.as_str())?,
             ftype: filetype(data.ftype.as_str())?,
         })

@@ -117,13 +117,7 @@ impl RecFs {
             let items = self.client.list(parent_fid).map_err(|_| libc::ENOENT)?;
             Ok(items.into_iter().find(|i| i.fid == fid).unwrap())
         } else {
-            Ok(RecListItem {
-                bytes: 0,
-                name: "".to_string(),
-                hash: "".to_string(),
-                fid: Fid::root(),
-                ftype: FileType::Directory,
-            })
+            Ok(RecListItem::root())
         }
     }
 }
