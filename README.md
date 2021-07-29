@@ -8,8 +8,8 @@ Mount 科大睿客网云盘 rec.ustc.edu.cn/recdrive
 
 已实现的功能：
 
-- ls
-    - 可以列出文件列表，但是用了 dummy attrs
+- list, attrs
+  - 可使用 ls
 
 ## 实现笔记
 
