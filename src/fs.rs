@@ -1,3 +1,4 @@
+use crate::client::list::RecListItem;
 use crate::client::RecClient;
 use crate::fid::Fid;
 use crate::fidmap::FidMap;
@@ -32,27 +33,22 @@ impl FilesystemMT for RecFs {
         } else {
             self.req_fid(path)?
         };
-        let mut attr = FileAttr {
-            size: 1,
+        let item = self.req_item(fid, parent_fid)?;
+        let attr = FileAttr {
+            size: item.bytes as u64,
             blocks: 1,
             atime: Timespec::new(0, 0),
             mtime: Timespec::new(0, 0),
             ctime: Timespec::new(0, 0),
             crtime: Timespec::new(0, 0),
-            kind: FileType::Directory,
-            perm: (libc::S_IRUSR & libc::S_IWUSR) as u16,
+            kind: item.ftype,
+            perm: (libc::S_IRUSR | libc::S_IWUSR) as u16,
             nlink: 0,
             uid: 0,
             gid: 0,
             rdev: 0,
             flags: 0,
         };
-        if let Some(_) = parent_fid {
-            if let Err(_) = self.client.list(fid) {
-                attr.kind = FileType::RegularFile;
-                return Ok((Timespec::new(1, 0), attr));
-            }
-        }
         Ok((Timespec::new(1, 0), attr))
     }
 
@@ -114,5 +110,20 @@ impl RecFs {
         let fid = map.borrow().get(fh).ok_or(libc::EBADF)?;
         let parent_fid = map.borrow().get_parent(fid).unwrap();
         Ok((fid, parent_fid))
+    }
+
+    fn req_item(&self, fid: Fid, parent_fid: Option<Fid>) -> Result<RecListItem, libc::c_int> {
+        if let Some(parent_fid) = parent_fid {
+            let items = self.client.list(parent_fid).map_err(|_| libc::ENOENT)?;
+            Ok(items.into_iter().find(|i| i.fid == fid).unwrap())
+        } else {
+            Ok(RecListItem {
+                bytes: 0,
+                name: "".to_string(),
+                hash: "".to_string(),
+                fid: Fid::root(),
+                ftype: FileType::Directory,
+            })
+        }
     }
 }
