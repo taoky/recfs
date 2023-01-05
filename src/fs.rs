@@ -24,6 +24,7 @@ impl RecFs {
 
         let (username, password) = RecAuth::interactive();
         auth.login(&client, username, password).unwrap();
+        // auth.refresh(&client).unwrap();
         client.set_auth(auth);
 
         Self {

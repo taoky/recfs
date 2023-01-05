@@ -111,6 +111,9 @@ mod tests {
     #[test]
     fn test_list() {
         let client = RecClient::default();
+
+        // TODO: add login logic in test
+
         let items = client.list(Fid::root()).unwrap();
         for item in items {
             if let FileType::Directory = item.ftype {

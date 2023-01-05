@@ -120,7 +120,9 @@ impl RecClient {
         path: &str,
         token: bool,
         json: &T,
+        headers: Option<&[(String, String)]>,
     ) -> anyhow::Result<RecRes<S>> {
+        assert!(!(token && headers.is_some()));
         let url = format!("{}{}", APIURL, path);
         let mut builder = self.client.post(url);
         if token {
@@ -130,6 +132,11 @@ impl RecClient {
                 "x-auth-token",
                 auth.token.as_ref().unwrap().access_token.as_str(),
             );
+        }
+        if let Some(headers) = headers {
+            for (key, value) in headers {
+                builder = builder.header(key, value);
+            }
         }
         let res = builder.json(json).send()?;
 

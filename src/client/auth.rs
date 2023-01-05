@@ -41,6 +41,12 @@ struct RecUserAuthResponse {
     refresh_token: String,
 }
 
+#[derive(Deserialize, Debug)]
+struct RecUserAuthRefreshResponse {
+    x_auth_token: String,
+    refresh_token: String,
+}
+
 impl RecAuth {
     pub fn get_tempticket(client: &RecClient) -> anyhow::Result<String> {
         let body = client.get_noretry::<_, RecTempTicketEntity>(
@@ -128,6 +134,7 @@ impl RecAuth {
             format!("user/login?tempticket={}&sign={}", tempticket, md5sign).as_str(),
             false,
             &json!({ "msg_encrypt": encrypted_string }),
+            None,
         )?;
         status_check!(response);
         let decrypted_string = RecAuth::aes_decrypt(&response.entity.msg_encrypt, true)?;
@@ -153,6 +160,26 @@ impl RecAuth {
     }
 
     pub fn refresh(&mut self, client: &RecClient) -> anyhow::Result<()> {
-        unimplemented!()
+        let resp = client.post_noretry::<_, RecEncryptedEntity>(
+            "user/refresh/token",
+            false,
+            &json!({
+                "clientid": CLIENTID,
+                "refresh_token": self.token.as_ref().unwrap().refresh_token
+            }),
+            Some(&[(
+                "X-auth-token".to_owned(),
+                self.token.as_ref().unwrap().access_token.to_owned(),
+            )]),
+        )?;
+        status_check!(resp);
+        let decrypted_string = RecAuth::aes_decrypt(&resp.entity.msg_encrypt, false)?;
+        debug!("{}", decrypted_string);
+        let refresh_auth = serde_json::from_str::<RecUserAuthRefreshResponse>(&decrypted_string)?;
+        self.token = Some(Token {
+            access_token: refresh_auth.x_auth_token,
+            refresh_token: refresh_auth.refresh_token,
+        });
+        Ok(())
     }
 }
