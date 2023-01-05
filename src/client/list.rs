@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::FromStr;
-use time::Timespec;
+use std::time::{SystemTime, Duration};
 
 #[derive(Deserialize)]
 struct RecListEntity {
@@ -35,7 +35,7 @@ pub struct RecListItem {
     pub hash: Option<String>,
     pub fid: Fid,
     pub ftype: FileType,
-    pub time_updated: Timespec,
+    pub time_updated: SystemTime,
 }
 
 impl RecListItem {
@@ -46,7 +46,7 @@ impl RecListItem {
             hash: None,
             fid: Fid::root(),
             ftype: FileType::Directory,
-            time_updated: Timespec::new(0, 0),
+            time_updated: SystemTime::UNIX_EPOCH,
         }
     }
 }
@@ -55,7 +55,7 @@ impl TryFrom<RecListData> for RecListItem {
     type Error = anyhow::Error;
 
     fn try_from(data: RecListData) -> Result<Self, Self::Error> {
-        let time = FixedOffset::west(8)
+        let time = FixedOffset::west_opt(8).unwrap()
             .datetime_from_str(data.last_update_date.as_str(), "%Y-%m-%d %H:%M:%S")?
             .naive_utc();
         Ok(Self {
@@ -72,7 +72,7 @@ impl TryFrom<RecListData> for RecListItem {
             },
             fid: Fid::from_str(data.number.as_str())?,
             ftype: filetype(data.ftype.as_str())?,
-            time_updated: Timespec::new(time.timestamp(), time.timestamp_subsec_nanos() as i32),
+            time_updated: SystemTime::UNIX_EPOCH + Duration::new(time.timestamp() as u64, time.timestamp_subsec_nanos() as u32),
         })
     }
 }

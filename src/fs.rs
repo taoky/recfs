@@ -9,7 +9,7 @@ use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsString;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
-use time::Timespec;
+use std::time::{Duration, SystemTime};
 
 pub struct RecFs {
     client: RecClient,
@@ -38,8 +38,8 @@ impl FilesystemMT for RecFs {
             blocks: 1,
             atime: item.time_updated,
             mtime: item.time_updated,
-            ctime: Timespec::new(0, 0),
-            crtime: Timespec::new(0, 0),
+            ctime: SystemTime::UNIX_EPOCH,
+            crtime: SystemTime::UNIX_EPOCH,
             kind: item.ftype,
             perm: (libc::S_IRUSR | libc::S_IWUSR) as u16,
             nlink: 0,
@@ -48,7 +48,7 @@ impl FilesystemMT for RecFs {
             rdev: 0,
             flags: 0,
         };
-        Ok((Timespec::new(1, 0), attr))
+        Ok((Duration::new(1, 0), attr))
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
