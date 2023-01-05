@@ -10,13 +10,13 @@ use std::convert::TryFrom;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct RecListEntity {
     datas: Vec<RecListData>,
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct RecListData {
     bytes: Value,
     file_ext: String,
@@ -96,7 +96,6 @@ impl RecClient {
         )?;
         status_check!(body);
         body.entity
-            .unwrap()
             .datas
             .into_iter()
             .map(RecListItem::try_from)

@@ -22,9 +22,10 @@ impl RecFs {
         let mut client = RecClient::default();
         let mut auth = RecAuth::default();
 
-        auth.login(&client, "114514".to_owned(), "1919810".to_owned()).unwrap();
+        let (username, password) = RecAuth::interactive();
+        auth.login(&client, username, password).unwrap();
         client.set_auth(auth);
-        
+
         Self {
             client,
             fid_map: Arc::new(RwLock::new(FidMap::new())),

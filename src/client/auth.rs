@@ -1,9 +1,10 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, io::Write};
 
 use libaes::Cipher;
+use log::{debug, info};
+use rpassword::read_password;
 use serde::Deserialize;
 use serde_json::json;
-use log::info;
 
 use crate::status_check;
 
@@ -20,17 +21,18 @@ pub struct RecAuth {
     pub token: Option<Token>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct RecTempTicketEntity {
     tempticket: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct RecEncryptedEntity {
     msg_encrypt: String,
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)]
 struct RecUserAuthResponse {
     gid: String,
     username: String,
@@ -47,12 +49,12 @@ impl RecAuth {
             &[("clientid", CLIENTID)],
         )?;
         status_check!(body);
-        Ok(body.entity.unwrap().tempticket)
+        Ok(body.entity.tempticket)
     }
 
     fn aes_encrypt(data: &str) -> anyhow::Result<String> {
         let cipher = Cipher::new_128(AESKEY);
-        let mut iv = AESKEY.clone();
+        let mut iv = *AESKEY;
         iv.reverse();
 
         let data_len: u32 = data.len().try_into()?;
@@ -65,14 +67,14 @@ impl RecAuth {
 
     fn aes_decrypt(data: &str, strip: bool) -> anyhow::Result<String> {
         let cipher = Cipher::new_128(AESKEY);
-        let mut iv = AESKEY.clone();
+        let mut iv = *AESKEY;
         iv.reverse();
 
         let encrypted = base64::decode(data)?;
         let decrypted = cipher.cbc_decrypt(&iv, &encrypted);
         if strip {
-            let data_len = u32::from_be_bytes(decrypted[0..4].try_into()?);
-            let data = String::from_utf8(decrypted[4..(4 + data_len as usize)].to_vec())?;
+            debug!("{:?}", std::str::from_utf8(&decrypted));
+            let data = String::from_utf8(decrypted[16..].to_vec())?;
             Ok(data)
         } else {
             Ok(String::from_utf8(decrypted)?)
@@ -98,7 +100,7 @@ impl RecAuth {
         cas_username: String,
         cas_password: String,
     ) -> anyhow::Result<()> {
-        let tempticket = RecAuth::get_tempticket(&client)?;
+        let tempticket = RecAuth::get_tempticket(client)?;
 
         let string = format!(
             "{}{}",
@@ -110,7 +112,6 @@ impl RecAuth {
                 "client_terminal_type": "client",
                 "type": "nusoap"
             })
-            .to_string()
         );
         let encrypted_string = RecAuth::aes_encrypt(&string)?;
         let sign = format!(
@@ -121,19 +122,37 @@ impl RecAuth {
                 ("msg_encrypt".to_string(), encrypted_string.clone())
             ])
         );
-        info!("{}", sign);
         let md5sign = format!("{:X}", md5::compute(sign));
 
         let response = client.post_noretry::<_, RecEncryptedEntity>(
             format!("user/login?tempticket={}&sign={}", tempticket, md5sign).as_str(),
             false,
-            &[("msg_encrypt", encrypted_string)],
+            &json!({ "msg_encrypt": encrypted_string }),
         )?;
         status_check!(response);
-        let decrypted_string = RecAuth::aes_decrypt(&response.entity.unwrap().msg_encrypt, true)?;
+        let decrypted_string = RecAuth::aes_decrypt(&response.entity.msg_encrypt, true)?;
         let userauth = serde_json::from_str::<RecUserAuthResponse>(&decrypted_string)?;
-        info!("{:?}", userauth);
+        debug!("{:?}", userauth);
 
+        self.token = Some(Token {
+            access_token: userauth.x_auth_token,
+            refresh_token: userauth.refresh_token,
+        });
+        Ok(())
+    }
+
+    pub fn interactive() -> (String, String) {
+        let mut username = String::new();
+        print!("Username: ");
+        std::io::stdout().flush().unwrap();
+        std::io::stdin().read_line(&mut username).unwrap();
+        print!("Password: ");
+        std::io::stdout().flush().unwrap();
+        let password = read_password().unwrap();
+        (username.trim().to_string(), password)
+    }
+
+    pub fn refresh(&mut self, client: &RecClient) -> anyhow::Result<()> {
         unimplemented!()
     }
 }

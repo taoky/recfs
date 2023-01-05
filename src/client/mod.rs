@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use binary_macros::base64;
 use fuse_mt::FileType;
+use log::warn;
 use reqwest::blocking::Client;
+use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 
 use self::auth::RecAuth;
@@ -22,7 +24,7 @@ macro_rules! status_check {
             return Err(anyhow::anyhow!(
                 "Status code {}, error message: {}",
                 $x.status_code,
-                $x.message.unwrap_or("".to_owned())
+                $x.message
             ));
         }
     };
@@ -33,13 +35,32 @@ pub struct RecClient {
     client: Client,
 }
 
-#[derive(Deserialize)]
-pub struct RecRes<T> {
+#[derive(Deserialize, Debug)]
+pub struct RecRes<T>
+where
+    T: Default + for<'a> Deserialize<'a>,
+{
     // entity exists when succeed
-    entity: Option<T>,
+    #[serde(deserialize_with = "failure_to_default")]
+    entity: T,
     // message exists when failed
-    message: Option<String>,
+    message: String,
     status_code: i32,
+}
+
+fn failure_to_default<'de, D, T>(de: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    let key = match Option::<T>::deserialize(de) {
+        Ok(key) => key,
+        Err(e) => {
+            warn!("Serde gets undeserialize data: {}", e);
+            return Ok(T::default());
+        }
+    };
+    Ok(key.unwrap_or_default())
 }
 
 impl Default for RecClient {
@@ -56,7 +77,7 @@ impl RecClient {
         *self.auth.lock().unwrap() = auth;
     }
 
-    pub fn get_noretry<T: Serialize + ?Sized, S: for<'a> Deserialize<'a>>(
+    pub fn get_noretry<T: Serialize + ?Sized, S: for<'a> Deserialize<'a> + Default>(
         &self,
         path: &str,
         token: bool,
@@ -78,21 +99,23 @@ impl RecClient {
         Ok(body)
     }
 
-    pub fn get<T: Serialize + ?Sized, S: for<'a> Deserialize<'a>>(
+    pub fn get<T: Serialize + ?Sized, S: for<'a> Deserialize<'a> + Default>(
         &self,
         path: &str,
         query: &T,
     ) -> anyhow::Result<RecRes<S>> {
         let res = self.get_noretry(path, true, query)?;
         if res.status_code == 401 {
-            // TODO: refresh token
+            let auth = self.auth.clone();
+            let mut auth = auth.lock().unwrap();
+            auth.refresh(self)?;
             Ok(self.get_noretry(path, true, query)?)
         } else {
             Ok(res)
         }
     }
 
-    pub fn post_noretry<T: Serialize + ?Sized, S: for<'a> Deserialize<'a>>(
+    pub fn post_noretry<T: Serialize + ?Sized, S: for<'a> Deserialize<'a> + Default>(
         &self,
         path: &str,
         token: bool,
@@ -109,11 +132,10 @@ impl RecClient {
             );
         }
         let res = builder.json(json).send()?;
-        println!("{:?}", res.text());
-        unimplemented!();
-        // let body = serde_json::from_str::<RecRes<S>>(res.text()?.trim_start_matches('\u{feff}'))?;
 
-        // Ok(body)
+        let body = serde_json::from_str::<RecRes<S>>(res.text()?.trim_start_matches('\u{feff}'))?;
+
+        Ok(body)
     }
 }
 
