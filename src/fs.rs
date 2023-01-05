@@ -1,3 +1,4 @@
+use crate::client::auth::RecAuth;
 use crate::client::list::RecListItem;
 use crate::client::RecClient;
 use crate::fid::Fid;
@@ -17,9 +18,15 @@ pub struct RecFs {
 }
 
 impl RecFs {
-    pub fn new(auth_token: String) -> Self {
+    pub fn new() -> Self {
+        let mut client = RecClient::default();
+        let mut auth = RecAuth::default();
+
+        auth.login(&client, "114514".to_owned(), "1919810".to_owned()).unwrap();
+        client.set_auth(auth);
+        
         Self {
-            client: RecClient::new(auth_token),
+            client,
             fid_map: Arc::new(RwLock::new(FidMap::new())),
         }
     }
@@ -95,13 +102,12 @@ impl RecFs {
     }
 
     fn get_fid(&self, fh: u64) -> Result<Fid, libc::c_int> {
-        Ok(self
-            .fid_map
+        self.fid_map
             .read()
             .unwrap()
             .borrow()
             .get(fh)
-            .ok_or(libc::EBADF)?)
+            .ok_or(libc::EBADF)
     }
 
     fn get_fid_with_parent(&self, fh: u64) -> Result<(Fid, Option<Fid>), libc::c_int> {

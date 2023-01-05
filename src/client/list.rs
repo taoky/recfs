@@ -1,16 +1,17 @@
-use super::{filename, RecClient, RecRes};
+use super::{filename, RecClient};
 use crate::client::filetype;
 use crate::fid::Fid;
+use crate::status_check;
 use chrono::prelude::*;
 use fuse_mt::FileType;
 use serde::Deserialize;
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::FromStr;
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 #[derive(Deserialize)]
-struct RecListEntity {
+pub struct RecListEntity {
     datas: Vec<RecListData>,
 }
 
@@ -55,7 +56,8 @@ impl TryFrom<RecListData> for RecListItem {
     type Error = anyhow::Error;
 
     fn try_from(data: RecListData) -> Result<Self, Self::Error> {
-        let time = FixedOffset::west_opt(8).unwrap()
+        let time = FixedOffset::west_opt(8)
+            .unwrap()
             .datetime_from_str(data.last_update_date.as_str(), "%Y-%m-%d %H:%M:%S")?
             .naive_utc();
         Ok(Self {
@@ -65,41 +67,40 @@ impl TryFrom<RecListData> for RecListItem {
                 v => return Err(anyhow::Error::msg(format!("Invalid bytes field: {}", v))),
             },
             name: filename(data.name, data.file_ext),
-            hash: if data.hash == "" {
+            hash: if data.hash.is_empty() {
                 None
             } else {
                 Some(data.hash)
             },
             fid: Fid::from_str(data.number.as_str())?,
             ftype: filetype(data.ftype.as_str())?,
-            time_updated: SystemTime::UNIX_EPOCH + Duration::new(time.timestamp() as u64, time.timestamp_subsec_nanos() as u32),
+            time_updated: SystemTime::UNIX_EPOCH
+                + Duration::new(
+                    time.timestamp() as u64,
+                    time.timestamp_subsec_nanos() as u32,
+                ),
         })
     }
 }
 
 impl RecClient {
     pub fn list(&self, fid: Fid) -> anyhow::Result<Vec<RecListItem>> {
-        let url = format!("https://recapi.ustc.edu.cn/api/v2/folder/content/{}?disk_type=cloud&is_rec=false&category=all", fid);
-        let res = self
-            .client
-            .get(url)
-            .header("x-auth-token", self.auth_token.as_str())
-            .send()?;
-        let body = serde_json::from_str::<RecRes<RecListEntity>>(
-            res.text()?.trim_start_matches("\u{feff}"),
+        let path = format!("folder/content/{}", fid);
+        let body = self.get::<_, RecListEntity>(
+            &path,
+            &[
+                ("disk_type", "cloud"),
+                ("is_rec", "false"),
+                ("category", "all"),
+            ],
         )?;
-        if body.status_code != 200 {
-            Err(anyhow::Error::msg(format!(
-                "Status code {}",
-                body.status_code
-            )))
-        } else {
-            body.entity
-                .datas
-                .into_iter()
-                .map(|d| RecListItem::try_from(d))
-                .collect()
-        }
+        status_check!(body);
+        body.entity
+            .unwrap()
+            .datas
+            .into_iter()
+            .map(RecListItem::try_from)
+            .collect()
     }
 }
 
@@ -110,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_list() {
-        let client = RecClient::new(env::var("AUTH_TOKEN").unwrap().to_string());
+        let client = RecClient::default();
         let items = client.list(Fid::root()).unwrap();
         for item in items {
             if let FileType::Directory = item.ftype {

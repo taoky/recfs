@@ -18,7 +18,7 @@ impl Display for Fid {
         f.write_str(
             self.id
                 .map(|i| i.to_string())
-                .unwrap_or("0".to_owned())
+                .unwrap_or_else(|| "0".to_owned())
                 .as_str(),
         )
     }
