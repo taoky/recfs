@@ -105,14 +105,16 @@ impl RecClient {
 
 #[cfg(test)]
 mod tests {
+    use crate::client::auth::RecAuth;
+
     use super::*;
-    use std::env;
 
     #[test]
     fn test_list() {
-        let client = RecClient::default();
-
-        // TODO: add login logic in test
+        let mut client = RecClient::default();
+        let mut auth = RecAuth::default();
+        auth.try_keyring().unwrap();
+        client.set_auth(auth);
 
         let items = client.list(Fid::root()).unwrap();
         for item in items {

@@ -5,6 +5,7 @@ use crate::fid::Fid;
 use crate::fidmap::FidMap;
 use fuse_mt::{
     DirectoryEntry, FileAttr, FilesystemMT, RequestInfo, ResultEntry, ResultOpen, ResultReaddir,
+    ResultStatfs, Statfs,
 };
 use log::info;
 use std::borrow::{Borrow, BorrowMut};
@@ -17,6 +18,8 @@ pub struct RecFs {
     client: RecClient,
     fid_map: Arc<RwLock<FidMap>>,
 }
+
+const BLOCK_SIZE: u32 = 512;
 
 impl RecFs {
     pub fn new() -> Self {
@@ -87,6 +90,21 @@ impl FilesystemMT for RecFs {
             })
             .collect())
     }
+
+    fn statfs(&self, _req: RequestInfo, _path: &Path) -> ResultStatfs {
+        let userinfo = self.client.stat().map_err(|_| libc::ENOENT)?;
+        info!("statfs: {:?}", userinfo);
+        Ok(Statfs {
+            blocks: userinfo.total_space / BLOCK_SIZE as u64,
+            bfree: (userinfo.total_space - userinfo.used_space) / BLOCK_SIZE as u64,
+            bavail: (userinfo.total_space - userinfo.used_space) / BLOCK_SIZE as u64,
+            files: 0,
+            ffree: 0,
+            bsize: BLOCK_SIZE,
+            namelen: 255, // I also don't know how long can a file in rec be
+            frsize: BLOCK_SIZE,
+        })
+    }
 }
 
 impl RecFs {
@@ -94,12 +112,12 @@ impl RecFs {
         let mut parent_fid = None;
         let mut fid = Fid::root();
         for c in path.components().skip(1) {
-            let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
+            let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
             let s = c.as_os_str().to_string_lossy();
             match items.iter().find(|i| i.name == s) {
                 Some(item) => {
-                    parent_fid = Some(fid);
-                    fid = item.fid;
+                    parent_fid = Some(fid.clone());
+                    fid = item.fid.clone();
                 }
                 None => return Err(libc::ENOENT),
             }
@@ -119,7 +137,7 @@ impl RecFs {
     fn get_fid_with_parent(&self, fh: u64) -> Result<(Fid, Option<Fid>), libc::c_int> {
         let map = self.fid_map.read().unwrap();
         let fid = map.borrow().get(fh).ok_or(libc::EBADF)?;
-        let parent_fid = map.borrow().get_parent(fid).unwrap();
+        let parent_fid = map.borrow().get_parent(fid.clone()).unwrap();
         Ok((fid, parent_fid))
     }
 

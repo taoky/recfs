@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod list;
+pub mod stat;
 
 use std::sync::{Arc, Mutex};
 
@@ -16,6 +17,8 @@ const APIURL: &str = "https://recapi.ustc.edu.cn/api/v2/";
 const CLIENTID: &str = "d5485a8c-fecb-11e9-b690-005056b70c02";
 const SIGNATURE: &str = "VZPDF6HxKyh0hhqFqY2Tk6udzlambRgK";
 static AESKEY: &[u8; 16] = base64!("Z1pNbFZmMmVqd2wwVmlHNA==");
+
+type EmptyQuery = [(String, String); 0];
 
 #[macro_export]
 macro_rules! status_check {

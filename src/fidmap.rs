@@ -28,7 +28,7 @@ impl FidMap {
             Some(&fh) => fh,
             None => {
                 let fh = self.next_fh();
-                self.map.insert(fh, fid);
+                self.map.insert(fh, fid.clone());
                 self.parent_map.insert(fid, parent_fid);
                 fh
             }
