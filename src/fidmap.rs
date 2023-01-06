@@ -5,7 +5,7 @@ use std::{collections::HashMap, time::SystemTime};
 
 #[derive(Debug, Clone, Default)]
 pub struct FidCachedList {
-    pub children: Vec<RecListItem>,
+    pub children: Option<Vec<RecListItem>>, // None => type is not dir
 }
 
 pub struct FidMap {

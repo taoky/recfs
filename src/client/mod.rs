@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod download;
 pub mod list;
 pub mod stat;
 
@@ -7,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use binary_macros::base64;
 use fuse_mt::FileType;
-use log::{info, warn, debug};
+use log::{debug, info, warn};
 use reqwest::blocking::Client;
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
@@ -155,6 +156,24 @@ impl RecClient {
         let body = serde_json::from_str::<RecRes<S>>(text.trim_start_matches('\u{feff}'))?;
 
         Ok(body)
+    }
+
+    pub fn post<T: Serialize + ?Sized + Debug, S: for<'a> Deserialize<'a> + Default>(
+        &self,
+        path: &str,
+        json: &T,
+    ) -> anyhow::Result<RecRes<S>> {
+        let res = self.post_noretry(path, true, json, None)?;
+        if res.status_code == 401 {
+            {
+                let auth = self.auth.clone();
+                let mut auth = auth.lock().unwrap();
+                auth.refresh(self)?;
+            }
+            Ok(self.post_noretry(path, true, json, None)?)
+        } else {
+            Ok(res)
+        }
     }
 }
 

@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::process::exit;
 
+mod cache;
 mod client;
 mod fid;
 mod fidmap;

@@ -1,3 +1,4 @@
+use crate::cache::Cache;
 use crate::client::auth::RecAuth;
 use crate::client::list::RecListItem;
 use crate::client::RecClient;
@@ -7,9 +8,12 @@ use fuse_mt::{
     DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo, ResultEntry, ResultOpen,
     ResultReaddir, ResultStatfs, Statfs,
 };
+use libc::O_RDONLY;
 use log::{info, warn};
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsString;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
@@ -17,6 +21,7 @@ use std::time::{Duration, SystemTime};
 pub struct RecFs {
     client: RecClient,
     fid_map: Arc<RwLock<FidMap>>,
+    disk_cache: Cache,
 }
 
 const BLOCK_SIZE: u32 = 512;
@@ -37,6 +42,7 @@ impl RecFs {
         Self {
             client,
             fid_map: Arc::new(RwLock::new(FidMap::new())),
+            disk_cache: Cache::default(),
         }
     }
 }
@@ -93,6 +99,7 @@ impl FilesystemMT for RecFs {
         let listing = self.get_listing(fid)?;
         Ok(listing
             .children
+            .ok_or(libc::ENOTDIR)?
             .iter()
             .map(|i| DirectoryEntry {
                 name: OsString::from(i.name.clone()),
@@ -115,6 +122,90 @@ impl FilesystemMT for RecFs {
             frsize: BLOCK_SIZE,
         })
     }
+
+    fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
+        let (fid, parent) = self.req_fid(path)?;
+        let item = self.get_item(fid.clone(), parent.clone())?;
+        if item.ftype != FileType::RegularFile {
+            return Err(libc::EISDIR);
+        }
+        if (flags | O_RDONLY as u32) == 0 {
+            // write mode unimplemented
+            return Err(libc::ENOSYS);
+        }
+        Ok((
+            self.fid_map
+                .write()
+                .unwrap()
+                .borrow_mut()
+                .set_fh(&fid, parent.as_ref(), None),
+            flags,
+        ))
+    }
+
+    fn read(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        fh: u64,
+        offset: u64,
+        size: u32,
+        callback: impl FnOnce(fuse_mt::ResultSlice<'_>) -> fuse_mt::CallbackResult,
+    ) -> fuse_mt::CallbackResult {
+        let fid = match self.get_fid(fh) {
+            Err(e) => {
+                warn!("read() failed when getting fid: {}", e);
+                return callback(Err(libc::EIO));
+            }
+            Ok(res) => res,
+        };
+
+        let mut file = match {
+            match self.disk_cache.contains(fid.clone()) {
+                Some(path) => File::open(path),
+                None => {
+                    let url = self.client.get_download_url(fid.clone());
+                    let url = match url {
+                        Ok(url) => url,
+                        Err(e) => {
+                            warn!("read() failed when getting URL: {}", e);
+                            return callback(Err(libc::EIO));
+                        }
+                    };
+                    if let Err(e) = self.disk_cache.fetch(fid.clone(), url) {
+                        warn!("read() failed when downloading: {}", e);
+                        return callback(Err(libc::EIO));
+                    }
+                    let path = match self.disk_cache.contains(fid.clone()) {
+                        Some(path) => path,
+                        None => {
+                            warn!("read() failed when getting path after downloaded");
+                            return callback(Err(libc::EIO));
+                        }
+                    };
+                    File::open(path)
+                }
+            }
+        } {
+            Ok(file) => file,
+            Err(e) => {
+                warn!("read() failed when opening cached file: {}", e);
+                return callback(Err(libc::EIO));
+            }
+        };
+        if let Err(e) = file.seek(SeekFrom::Start(offset)) {
+            warn!("read() failed when seeking cached file: {}", e);
+            return callback(Err(libc::EIO));
+        }
+
+        let mut data = Vec::<u8>::with_capacity(size as usize);
+        if let Err(e) = file.read_to_end(&mut data) {
+            warn!("read() failed when reading cached file: {}", e);
+            return callback(Err(libc::EIO));
+        }
+
+        callback(Ok(&data))
+    }
 }
 
 impl RecFs {
@@ -129,16 +220,19 @@ impl RecFs {
                 let map = self.fid_map.read().unwrap();
                 if let Some(n) = map.borrow().get_listing(&fid) {
                     let mut found = false;
-                    for child in n.children.iter() {
-                        if child.name == c.as_os_str().to_string_lossy() {
-                            info!("found in cache: {:?}", child);
-                            parent = Some(fid);
-                            fid = child.fid.clone();
-                            is_dir = child.ftype == FileType::Directory;
-                            found = true;
-                            break;
+                    if let Some(children) = &n.children {
+                        for child in children.iter() {
+                            if child.name == c.as_os_str().to_string_lossy() {
+                                info!("found in cache: {:?}", child);
+                                parent = Some(fid);
+                                fid = child.fid.clone();
+                                is_dir = child.ftype == FileType::Directory;
+                                found = true;
+                                break;
+                            }
                         }
                     }
+
                     if found {
                         continue;
                     }
@@ -152,7 +246,7 @@ impl RecFs {
             {
                 let mut map = self.fid_map.write().unwrap();
                 let mut node = map.borrow_mut().get_listing_mut(fid.clone());
-                node.children = items.clone();
+                node.children = Some(items.clone());
                 for child in items.iter() {
                     map.borrow_mut()
                         .get_parentmap_mut()
@@ -170,15 +264,34 @@ impl RecFs {
             }
         }
         // if current fid is dir and not in cache (including /), request from server
-        let is_in_fidmap = self.fid_map.read().unwrap().borrow().get_listing(&fid).is_some();
-        info!("fid: {}, is_dir: {}, is_in_fidmap: {}", fid, is_dir, is_in_fidmap);
-        if is_dir && !is_in_fidmap {
-            let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
-            self.fid_map
-                .write()
-                .unwrap()
-                .borrow_mut()
-                .update_fid(&fid, parent.as_ref(), &FidCachedList { children: items });
+        let is_in_fidmap = self
+            .fid_map
+            .read()
+            .unwrap()
+            .borrow()
+            .get_listing(&fid)
+            .is_some();
+        info!(
+            "fid: {}, is_dir: {}, is_in_fidmap: {}",
+            fid, is_dir, is_in_fidmap
+        );
+        if !is_in_fidmap {
+            if is_dir {
+                let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
+                self.fid_map.write().unwrap().borrow_mut().update_fid(
+                    &fid,
+                    parent.as_ref(),
+                    &FidCachedList {
+                        children: Some(items),
+                    },
+                );
+            } else {
+                self.fid_map.write().unwrap().borrow_mut().update_fid(
+                    &fid,
+                    parent.as_ref(),
+                    &FidCachedList { children: None },
+                );
+            }
         }
         Ok((fid, parent))
     }
@@ -208,6 +321,8 @@ impl RecFs {
         let listing = map.get_listing(&parent).ok_or(libc::ENOENT)?;
         listing
             .children
+            .as_ref()
+            .ok_or(libc::ENOTDIR)?
             .iter()
             .find(|i| i.fid == fid)
             .ok_or(libc::ENOENT)
@@ -234,7 +349,7 @@ impl RecFs {
                 .write()
                 .unwrap()
                 .get_listing_mut(parent_fid.clone())
-                .children = items.clone();
+                .children = Some(items.clone());
             Ok(items.into_iter().find(|i| i.fid == fid).unwrap())
         } else {
             Ok(RecListItem::root())
