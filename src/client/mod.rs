@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod download;
 pub mod list;
+pub mod mkdir;
 pub mod stat;
 
 use std::fmt::Debug;

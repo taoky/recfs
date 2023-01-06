@@ -9,7 +9,7 @@ use fuse_mt::{
     ResultReaddir, ResultStatfs, Statfs,
 };
 use libc::O_RDONLY;
-use log::{info, warn};
+use log::{debug, info, warn};
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsString;
 use std::fs::File;
@@ -47,17 +47,11 @@ impl RecFs {
     }
 }
 
-impl FilesystemMT for RecFs {
-    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
-        let (fid, parent) = if let Some(fh) = fh {
-            self.get_fid_with_parent(fh)?
-        } else {
-            self.req_fid(path)?
-        };
-        let item = self.get_item(fid, parent)?;
-        let attr = FileAttr {
+impl From<RecListItem> for FileAttr {
+    fn from(item: RecListItem) -> Self {
+        FileAttr {
             size: item.bytes as u64,
-            blocks: 1,
+            blocks: item.bytes as u64 / BLOCK_SIZE as u64,
             atime: item.time_updated,
             mtime: item.time_updated,
             ctime: SystemTime::UNIX_EPOCH,
@@ -69,13 +63,25 @@ impl FilesystemMT for RecFs {
             gid: 0,
             rdev: 0,
             flags: 0,
+        }
+    }
+}
+
+impl FilesystemMT for RecFs {
+    fn getattr(&self, _req: RequestInfo, path: &Path, fh: Option<u64>) -> ResultEntry {
+        let (fid, parent) = if let Some(fh) = fh {
+            self.get_fid_with_parent(fh)?
+        } else {
+            self.req_fid(path)?
         };
+        let item = self.get_item(fid, parent)?;
+        let attr: FileAttr = item.into();
         Ok((Duration::new(1, 0), attr))
     }
 
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
         let (fid, parent) = self.req_fid(path)?;
-        info!("opendir(): {} {:?}", fid, parent);
+        debug!("opendir(): {} {:?}", fid, parent);
         let item = self.get_item(fid.clone(), parent.clone())?;
         info!("opendir(): Dir opened: {:?}", item);
         if item.ftype != FileType::Directory {
@@ -206,6 +212,34 @@ impl FilesystemMT for RecFs {
 
         callback(Ok(&data))
     }
+
+    fn mkdir(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &std::ffi::OsStr,
+        _mode: u32,
+    ) -> ResultEntry {
+        let (fid, _parent) = self.req_fid(parent)?;
+        self.client
+            .mkdir(fid.clone(), name.to_str().ok_or(libc::EINVAL)?.to_string())
+            .map_err(|_| libc::EIO)?;
+        let list = self.req_update_listing(fid)?;
+        let mut found = None;
+        let children = list.children.ok_or(libc::ENOTDIR)?;
+        for child in children.iter() {
+            if child.name == name.to_string_lossy() {
+                found = Some(child);
+                break;
+            }
+        }
+        let found = match found {
+            None => return Err(libc::ENOENT),
+            Some(found) => found.clone(),
+        };
+
+        Ok((Duration::default(), found.into()))
+    }
 }
 
 impl RecFs {
@@ -271,7 +305,7 @@ impl RecFs {
             .borrow()
             .get_listing(&fid)
             .is_some();
-        info!(
+        debug!(
             "fid: {}, is_dir: {}, is_in_fidmap: {}",
             fid, is_dir, is_in_fidmap
         );
@@ -354,5 +388,17 @@ impl RecFs {
         } else {
             Ok(RecListItem::root())
         }
+    }
+
+    fn req_update_listing(&self, fid: Fid) -> Result<FidCachedList, libc::c_int> {
+        let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
+        self.fid_map
+            .write()
+            .unwrap()
+            .get_listing_mut(fid.clone())
+            .children = Some(items.clone());
+        Ok(FidCachedList {
+            children: Some(items),
+        })
     }
 }

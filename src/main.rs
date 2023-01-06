@@ -1,4 +1,5 @@
 use crate::fs::RecFs;
+use env_logger::Env;
 use fuse_mt::{mount, FuseMT};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -11,7 +12,7 @@ mod fidmap;
 mod fs;
 
 fn main() {
-    env_logger::init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     let args = env::args_os().collect::<Vec<OsString>>();
     if args.len() != 2 {
