@@ -4,19 +4,20 @@ use crate::fid::Fid;
 use crate::status_check;
 use chrono::prelude::*;
 use fuse_mt::FileType;
+use log::debug;
 use serde::Deserialize;
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 pub struct RecListEntity {
     datas: Vec<RecListData>,
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Debug)]
 struct RecListData {
     bytes: Value,
     file_ext: String,
@@ -106,6 +107,7 @@ impl RecClient {
                 ("category", "all"),
             ],
         )?;
+        debug!("list() body: {:?}", body);
         status_check!(body);
         let mut items = body
             .entity

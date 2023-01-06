@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use binary_macros::base64;
 use fuse_mt::FileType;
-use log::{info, warn};
+use log::{info, warn, debug};
 use reqwest::blocking::Client;
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ type EmptyQuery = [(String, String); 0];
 macro_rules! status_check {
     ($x: expr) => {
         if $x.status_code != 200 {
+            crate::client::warn!("Get error message from rec: {}", $x.message);
             return Err(anyhow::anyhow!(
                 "Status code {}, error message: {}",
                 $x.status_code,
@@ -99,7 +100,9 @@ impl RecClient {
             );
         }
         let res = builder.query(query).send()?;
-        let body = serde_json::from_str::<RecRes<S>>(res.text()?.trim_start_matches('\u{feff}'))?;
+        let text = res.text()?;
+        debug!("GET Response: {}", text);
+        let body = serde_json::from_str::<RecRes<S>>(text.trim_start_matches('\u{feff}'))?;
 
         Ok(body)
     }
@@ -147,8 +150,9 @@ impl RecClient {
             }
         }
         let res = builder.json(json).send()?;
-
-        let body = serde_json::from_str::<RecRes<S>>(res.text()?.trim_start_matches('\u{feff}'))?;
+        let text = res.text()?;
+        debug!("POST Response: {}", text);
+        let body = serde_json::from_str::<RecRes<S>>(text.trim_start_matches('\u{feff}'))?;
 
         Ok(body)
     }

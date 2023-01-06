@@ -121,7 +121,7 @@ impl RecFs {
     fn req_fid(&self, path: &Path) -> Result<(Fid, Option<Fid>), libc::c_int> {
         let mut parent = None;
         let mut fid = Fid::root();
-        // let mut is_dir = true;
+        let mut is_dir = true;
 
         for c in path.components().skip(1) {
             // is current fid in cache?
@@ -134,6 +134,7 @@ impl RecFs {
                             info!("found in cache: {:?}", child);
                             parent = Some(fid);
                             fid = child.fid.clone();
+                            is_dir = child.ftype == FileType::Directory;
                             found = true;
                             break;
                         }
@@ -163,22 +164,22 @@ impl RecFs {
                 Some(item) => {
                     parent = Some(fid);
                     fid = item.fid.clone();
-                    // is_dir = item.ftype == FileType::Directory;
+                    is_dir = item.ftype == FileType::Directory;
                 }
                 None => return Err(libc::ENOENT),
             }
         }
         // if current fid is dir and not in cache (including /), request from server
-        // let is_in_fidmap = self.fid_map.read().unwrap().borrow().get_listing(&fid).is_some();
-        // info!("fid: {}, is_dir: {}, is_in_fidmap: {}", fid, is_dir, is_in_fidmap);
-        // if is_dir && !is_in_fidmap {
-        //     let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
-        //     self.fid_map
-        //         .write()
-        //         .unwrap()
-        //         .borrow_mut()
-        //         .update_fid(&fid, parent.as_ref(), &FidCachedList { children: items });
-        // }
+        let is_in_fidmap = self.fid_map.read().unwrap().borrow().get_listing(&fid).is_some();
+        info!("fid: {}, is_dir: {}, is_in_fidmap: {}", fid, is_dir, is_in_fidmap);
+        if is_dir && !is_in_fidmap {
+            let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
+            self.fid_map
+                .write()
+                .unwrap()
+                .borrow_mut()
+                .update_fid(&fid, parent.as_ref(), &FidCachedList { children: items });
+        }
         Ok((fid, parent))
     }
 
