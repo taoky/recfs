@@ -30,6 +30,7 @@ struct RecListData {
     ftype: String,
 }
 
+#[derive(Debug, Clone)]
 pub struct RecListItem {
     pub bytes: usize,
     pub name: String,
@@ -93,17 +94,21 @@ impl RecClient {
         let body = self.get::<_, RecListEntity>(
             &path,
             &[
-                ("disk_type", match fid.to_string().as_str() {
-                    "B_0" => "backup",
-                    "R_0" => "recycle",
-                    _ => "cloud"
-                }),
+                (
+                    "disk_type",
+                    match fid.to_string().as_str() {
+                        "B_0" => "backup",
+                        "R_0" => "recycle",
+                        _ => "cloud",
+                    },
+                ),
                 ("is_rec", "false"),
                 ("category", "all"),
             ],
         )?;
         status_check!(body);
-        let mut items = body.entity
+        let mut items = body
+            .entity
             .datas
             .into_iter()
             .map(RecListItem::try_from)

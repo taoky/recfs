@@ -1,46 +1,88 @@
-use crate::fid::Fid;
+use crate::{client::list::RecListItem, fid::Fid};
 use bimap::BiBTreeMap;
-use std::collections::HashMap;
+use fuse_mt::FileType;
+use std::{collections::HashMap, time::SystemTime};
+
+#[derive(Debug, Clone, Default)]
+pub struct FidCachedList {
+    pub children: Vec<RecListItem>,
+}
 
 pub struct FidMap {
-    map: BiBTreeMap<u64, Fid>,
-    parent_map: HashMap<Fid, Option<Fid>>,
+    fhmap: BiBTreeMap<u64, Fid>, // a bidirectional map of "file handle" and Fid
+    listing_map: HashMap<Fid, FidCachedList>, // a map from Fid to the HTTP cache of listing
+    parent_map: HashMap<Fid, Option<Fid>>, // a map from Fid to its parent
 }
 
 impl FidMap {
     pub fn new() -> Self {
-        Self {
-            map: BiBTreeMap::new(),
+        let mut fm = Self {
+            fhmap: BiBTreeMap::new(),
+            listing_map: HashMap::new(),
             parent_map: HashMap::new(),
-        }
+        };
+        fm.parent_map.insert(Fid::root(), None);
+        fm
     }
 
-    pub fn get(&self, fh: u64) -> Option<Fid> {
-        self.map.get_by_left(&fh).cloned()
+    pub fn get_fid_by_fh(&self, fh: u64) -> Option<Fid> {
+        self.fhmap.get_by_left(&fh).cloned()
     }
 
-    pub fn get_parent(&self, fid: Fid) -> Option<Option<Fid>> {
+    pub fn get_parent_fid(&self, fid: &Fid) -> Option<Option<Fid>> {
         self.parent_map.get(&fid).cloned()
     }
 
-    pub fn set(&mut self, fid: Fid, parent_fid: Option<Fid>) -> u64 {
-        match self.map.get_by_right(&fid) {
+    pub fn get_listing(&self, fid: &Fid) -> Option<&FidCachedList> {
+        self.listing_map.get(fid)
+    }
+
+    pub fn get_listing_mut(&mut self, fid: Fid) -> &mut FidCachedList {
+        self.listing_map
+            .entry(fid)
+            .or_insert(FidCachedList::default())
+    }
+
+    pub fn get_parentmap_mut(&mut self) -> &mut HashMap<Fid, Option<Fid>> {
+        &mut self.parent_map
+    }
+
+    // set the file handle for a Fid, and return the file handle
+    // it will not update maps if file handle exists
+    pub fn set_fh(&mut self, fid: &Fid, parent: Option<&Fid>, list: Option<&FidCachedList>) -> u64 {
+        match self.fhmap.get_by_right(&fid) {
             Some(&fh) => fh,
             None => {
                 let fh = self.next_fh();
-                self.map.insert(fh, fid.clone());
-                self.parent_map.insert(fid, parent_fid);
+                self.fhmap.insert(fh, fid.clone());
+                match list {
+                    Some(list) => {
+                        self.update_fid(fid, parent, list);
+                    }
+                    None => {
+                        assert!(
+                            self.listing_map.contains_key(&fid)
+                                && self.parent_map.contains_key(&fid)
+                        );
+                    }
+                };
+
                 fh
             }
         }
     }
 
+    pub fn update_fid(&mut self, fid: &Fid, parent: Option<&Fid>, list: &FidCachedList) {
+        self.listing_map.insert(fid.clone(), list.clone());
+        self.parent_map.insert(fid.clone(), parent.cloned());
+    }
+
     fn next_fh(&self) -> u64 {
-        self.map
+        self.fhmap
             .iter()
             .enumerate()
             .find(|(i, (&a, _))| (*i as u64) < a)
             .map(|(i, _)| (i as u64) + 4)
-            .unwrap_or((self.map.len() as u64) + 3)
+            .unwrap_or((self.fhmap.len() as u64) + 3)
     }
 }

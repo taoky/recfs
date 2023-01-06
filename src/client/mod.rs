@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use binary_macros::base64;
 use fuse_mt::FileType;
-use log::{warn, info};
+use log::{info, warn};
 use reqwest::blocking::Client;
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
