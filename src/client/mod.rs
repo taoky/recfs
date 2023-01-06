@@ -2,11 +2,12 @@ pub mod auth;
 pub mod list;
 pub mod stat;
 
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use binary_macros::base64;
 use fuse_mt::FileType;
-use log::warn;
+use log::{warn, info};
 use reqwest::blocking::Client;
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
@@ -80,12 +81,13 @@ impl RecClient {
         *self.auth.lock().unwrap() = auth;
     }
 
-    pub fn get_noretry<T: Serialize + ?Sized, S: for<'a> Deserialize<'a> + Default>(
+    pub fn get_noretry<T: Serialize + ?Sized + Debug, S: for<'a> Deserialize<'a> + Default>(
         &self,
         path: &str,
         token: bool,
         query: &T,
     ) -> anyhow::Result<RecRes<S>> {
+        info!("GET {}?{:?}", path, query);
         let url = format!("{}{}", APIURL, path);
         let mut builder = self.client.get(url);
         if token {
@@ -102,23 +104,25 @@ impl RecClient {
         Ok(body)
     }
 
-    pub fn get<T: Serialize + ?Sized, S: for<'a> Deserialize<'a> + Default>(
+    pub fn get<T: Serialize + ?Sized + Debug, S: for<'a> Deserialize<'a> + Default>(
         &self,
         path: &str,
         query: &T,
     ) -> anyhow::Result<RecRes<S>> {
         let res = self.get_noretry(path, true, query)?;
         if res.status_code == 401 {
-            let auth = self.auth.clone();
-            let mut auth = auth.lock().unwrap();
-            auth.refresh(self)?;
+            {
+                let auth = self.auth.clone();
+                let mut auth = auth.lock().unwrap();
+                auth.refresh(self)?;
+            }
             Ok(self.get_noretry(path, true, query)?)
         } else {
             Ok(res)
         }
     }
 
-    pub fn post_noretry<T: Serialize + ?Sized, S: for<'a> Deserialize<'a> + Default>(
+    pub fn post_noretry<T: Serialize + ?Sized + Debug, S: for<'a> Deserialize<'a> + Default>(
         &self,
         path: &str,
         token: bool,
@@ -126,6 +130,7 @@ impl RecClient {
         headers: Option<&[(String, String)]>,
     ) -> anyhow::Result<RecRes<S>> {
         assert!(!(token && headers.is_some()));
+        info!("POST {} with json {:?}", path, json);
         let url = format!("{}{}", APIURL, path);
         let mut builder = self.client.post(url);
         if token {

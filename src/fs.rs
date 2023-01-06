@@ -101,7 +101,7 @@ impl FilesystemMT for RecFs {
             files: 0,
             ffree: 0,
             bsize: BLOCK_SIZE,
-            namelen: 255, // I also don't know how long can a file in rec be
+            namelen: 255, // I also don't know how long a file in rec can be
             frsize: BLOCK_SIZE,
         })
     }
