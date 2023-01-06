@@ -6,6 +6,7 @@ use crate::fidmap::FidMap;
 use fuse_mt::{
     DirectoryEntry, FileAttr, FilesystemMT, RequestInfo, ResultEntry, ResultOpen, ResultReaddir,
 };
+use log::info;
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::OsString;
 use std::path::Path;
@@ -22,9 +23,12 @@ impl RecFs {
         let mut client = RecClient::default();
         let mut auth = RecAuth::default();
 
-        let (username, password) = RecAuth::interactive();
-        auth.login(&client, username, password).unwrap();
-        // auth.refresh(&client).unwrap();
+        if let Err(e) = auth.try_keyring() {
+            info!("Failed to get auth from keyring: {}", e);
+            info!("Try interactive login...");
+            let (username, password) = RecAuth::interactive();
+            auth.login(&client, username, password).unwrap();
+        }
         client.set_auth(auth);
 
         Self {

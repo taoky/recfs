@@ -1,16 +1,16 @@
 use std::{convert::TryInto, io::Write};
 
 use libaes::Cipher;
-use log::{debug, info};
+use log::info;
 use rpassword::read_password;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::status_check;
 
 use super::{RecClient, AESKEY, CLIENTID, SIGNATURE};
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Token {
     pub access_token: String,
     pub refresh_token: String,
@@ -47,6 +47,8 @@ struct RecUserAuthRefreshResponse {
     refresh_token: String,
 }
 
+static SERVICENAME: &str = "recfs";
+
 impl RecAuth {
     pub fn get_tempticket(client: &RecClient) -> anyhow::Result<String> {
         let body = client.get_noretry::<_, RecTempTicketEntity>(
@@ -79,7 +81,7 @@ impl RecAuth {
         let encrypted = base64::decode(data)?;
         let decrypted = cipher.cbc_decrypt(&iv, &encrypted);
         if strip {
-            debug!("{:?}", std::str::from_utf8(&decrypted));
+            info!("{:?}", std::str::from_utf8(&decrypted));
             let data = String::from_utf8(decrypted[16..].to_vec())?;
             Ok(data)
         } else {
@@ -139,12 +141,13 @@ impl RecAuth {
         status_check!(response);
         let decrypted_string = RecAuth::aes_decrypt(&response.entity.msg_encrypt, true)?;
         let userauth = serde_json::from_str::<RecUserAuthResponse>(&decrypted_string)?;
-        debug!("{:?}", userauth);
+        info!("{:?}", userauth);
 
         self.token = Some(Token {
             access_token: userauth.x_auth_token,
             refresh_token: userauth.refresh_token,
         });
+        self.set_keyring()?;
         Ok(())
     }
 
@@ -157,6 +160,21 @@ impl RecAuth {
         std::io::stdout().flush().unwrap();
         let password = read_password().unwrap();
         (username.trim().to_string(), password)
+    }
+
+    pub fn try_keyring(&mut self) -> anyhow::Result<()> {
+        let entry = keyring::Entry::new(SERVICENAME, "userauth");
+        let userauth_json = entry.get_password()?;
+        let userauth = serde_json::from_str::<Token>(&userauth_json)?;
+        self.token = Some(userauth);
+        Ok(())
+    }
+
+    fn set_keyring(&mut self) -> anyhow::Result<()> {
+        let entry = keyring::Entry::new(SERVICENAME, "userauth");
+        let userauth_json = serde_json::to_string(&self.token.as_ref().unwrap())?;
+        entry.set_password(&userauth_json)?;
+        Ok(())
     }
 
     pub fn refresh(&mut self, client: &RecClient) -> anyhow::Result<()> {
@@ -174,12 +192,13 @@ impl RecAuth {
         )?;
         status_check!(resp);
         let decrypted_string = RecAuth::aes_decrypt(&resp.entity.msg_encrypt, false)?;
-        debug!("{}", decrypted_string);
+        info!("{}", decrypted_string);
         let refresh_auth = serde_json::from_str::<RecUserAuthRefreshResponse>(&decrypted_string)?;
         self.token = Some(Token {
             access_token: refresh_auth.x_auth_token,
             refresh_token: refresh_auth.refresh_token,
         });
+        self.set_keyring()?;
         Ok(())
     }
 }
