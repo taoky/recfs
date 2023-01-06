@@ -28,3 +28,9 @@ impl FromStr for Fid {
         Ok(Self { id: s.to_string() })
     }
 }
+
+impl From<String> for Fid {
+    fn from(s: String) -> Self {
+        Self { id: s }
+    }
+}

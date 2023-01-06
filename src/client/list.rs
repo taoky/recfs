@@ -85,21 +85,49 @@ impl TryFrom<RecListData> for RecListItem {
 
 impl RecClient {
     pub fn list(&self, fid: Fid) -> anyhow::Result<Vec<RecListItem>> {
-        let path = format!("folder/content/{}", fid);
+        let path = if fid.to_string() == "B_0" {
+            "folder/content/0".to_owned()
+        } else {
+            format!("folder/content/{}", fid)
+        };
         let body = self.get::<_, RecListEntity>(
             &path,
             &[
-                ("disk_type", "cloud"),
+                ("disk_type", match fid.to_string().as_str() {
+                    "B_0" => "backup",
+                    "R_0" => "recycle",
+                    _ => "cloud"
+                }),
                 ("is_rec", "false"),
                 ("category", "all"),
             ],
         )?;
         status_check!(body);
-        body.entity
+        let mut items = body.entity
             .datas
             .into_iter()
             .map(RecListItem::try_from)
-            .collect()
+            .collect::<anyhow::Result<Vec<RecListItem>>>()?;
+        if fid == Fid::root() {
+            items.push(RecListItem {
+                bytes: 0,
+                name: "?Backup".to_string(),
+                hash: None,
+                fid: "B_0".to_string().into(),
+                ftype: FileType::Directory,
+                time_updated: SystemTime::UNIX_EPOCH,
+            });
+            items.push(RecListItem {
+                bytes: 0,
+                name: "?Recycle".to_string(),
+                hash: None,
+                fid: "R_0".to_string().into(),
+                ftype: FileType::Directory,
+                time_updated: SystemTime::UNIX_EPOCH,
+            });
+        }
+
+        Ok(items)
     }
 }
 

@@ -4,8 +4,8 @@ use crate::client::RecClient;
 use crate::fid::Fid;
 use crate::fidmap::FidMap;
 use fuse_mt::{
-    DirectoryEntry, FileAttr, FilesystemMT, RequestInfo, ResultEntry, ResultOpen, ResultReaddir,
-    ResultStatfs, Statfs,
+    DirectoryEntry, FileAttr, FilesystemMT, RequestInfo, ResultEntry, ResultOpen,
+    ResultReaddir, ResultStatfs, Statfs,
 };
 use log::info;
 use std::borrow::{Borrow, BorrowMut};
@@ -81,7 +81,7 @@ impl FilesystemMT for RecFs {
 
     fn readdir(&self, _req: RequestInfo, _path: &Path, fh: u64) -> ResultReaddir {
         let fid = self.get_fid(fh)?;
-        let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
+        let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
         Ok(items
             .into_iter()
             .map(|i| DirectoryEntry {

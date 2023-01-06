@@ -46,7 +46,7 @@ where
     // entity exists when succeed
     #[serde(deserialize_with = "failure_to_default")]
     entity: T,
-    // message exists when failed
+    // message exists even when not failed
     message: String,
     status_code: i32,
 }
