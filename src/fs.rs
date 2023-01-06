@@ -1,6 +1,7 @@
 use crate::cache::Cache;
 use crate::client::auth::RecAuth;
 use crate::client::list::RecListItem;
+use crate::client::operation::Operation;
 use crate::client::RecClient;
 use crate::fid::Fid;
 use crate::fidmap::{FidCachedList, FidMap};
@@ -11,7 +12,7 @@ use fuse_mt::{
 use libc::O_RDONLY;
 use log::{debug, info, warn};
 use std::borrow::{Borrow, BorrowMut};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
@@ -205,7 +206,8 @@ impl FilesystemMT for RecFs {
         }
 
         let mut data = Vec::<u8>::with_capacity(size as usize);
-        if let Err(e) = file.read_to_end(&mut data) {
+        let mut chunk = file.take(size as u64);
+        if let Err(e) = chunk.read_to_end(&mut data) {
             warn!("read() failed when reading cached file: {}", e);
             return callback(Err(libc::EIO));
         }
@@ -238,11 +240,97 @@ impl FilesystemMT for RecFs {
             Some(found) => found.clone(),
         };
 
-        Ok((Duration::default(), found.into()))
+        Ok((Duration::new(1, 0), found.into()))
+    }
+
+    fn unlink(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &std::ffi::OsStr,
+    ) -> fuse_mt::ResultEmpty {
+        self.delete(parent, name)
+    }
+
+    fn rmdir(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &std::ffi::OsStr,
+    ) -> fuse_mt::ResultEmpty {
+        self.delete(parent, name)
+    }
+
+    fn rename(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &std::ffi::OsStr,
+        newparent: &Path,
+        newname: &std::ffi::OsStr,
+    ) -> fuse_mt::ResultEmpty {
+        if name == newname {
+            // move operation
+            if parent == newparent {
+                warn!("rename() (move) will do nothing as parent and newparent are the same");
+                return Ok(());
+            }
+            let path = parent.join(name);
+            let (fid, parent) = self.req_fid(&path)?;
+            let item = self.get_item(fid.clone(), parent.clone())?;
+            let (newfid, _newparent) = self.req_fid(newparent)?;
+            self.client
+                .operation(
+                    Operation::Move,
+                    fid.clone(),
+                    item.ftype,
+                    Some(newfid.to_string()),
+                )
+                .map_err(|_| libc::EIO)?;
+            self.req_update_listing(parent.unwrap_or(Fid::root()))?;
+            self.req_update_listing(newfid)?;
+            Ok(())
+        } else if parent == newparent {
+            // rename operation
+            let name_extension = Path::new(name).extension().and_then(OsStr::to_str);
+            let newname_extension = Path::new(newname).extension().and_then(OsStr::to_str);
+            if name_extension != newname_extension {
+                warn!("rename() move failed: name extension {:?} != newname extension {:?}", name_extension, newname_extension);
+                return Err(libc::ENOSYS);
+            }
+            // let name_stem = Path::new(name).file_stem().and_then(OsStr::to_str);
+            let newname_stem = Path::new(newname)
+                .file_stem()
+                .and_then(OsStr::to_str)
+                .ok_or(libc::EINVAL)?;
+
+            let path = parent.join(name);
+            let (fid, parent) = self.req_fid(&path)?;
+            let item = self.get_item(fid.clone(), parent.clone())?;
+            self.client
+                .rename(fid, newname_stem.to_string(), item.ftype)
+                .map_err(|_| libc::EIO)?;
+            self.req_update_listing(parent.unwrap_or(Fid::root()))?;
+            Ok(())
+        } else {
+            warn!("rename() does not support when name != newname && parent != newparent");
+            Err(libc::ENOSYS)
+        }
     }
 }
 
 impl RecFs {
+    fn delete(&self, parent: &Path, name: &std::ffi::OsStr) -> fuse_mt::ResultEmpty {
+        let path = parent.join(name);
+        let (fid, parent) = self.req_fid(&path)?;
+        let item = self.get_item(fid.clone(), parent.clone())?;
+        self.client
+            .operation(Operation::Delete, fid, item.ftype, None)
+            .map_err(|_| libc::EIO)?;
+        self.req_update_listing(parent.unwrap_or(Fid::root()))?;
+        Ok(())
+    }
+
     fn req_fid(&self, path: &Path) -> Result<(Fid, Option<Fid>), libc::c_int> {
         let mut parent = None;
         let mut fid = Fid::root();
