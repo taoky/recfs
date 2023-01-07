@@ -492,6 +492,31 @@ impl FilesystemMT for RecFs {
 
         Ok((Duration::new(1, 0), found.clone().into()))
     }
+
+    fn release(&self, _req: RequestInfo, _path: &Path, fh: u64, flags: u32, _lock_owner: u64, _flush: bool) -> fuse_mt::ResultEmpty {
+        if flags & libc::O_RDONLY as u32 != 0 {
+            Ok(())
+        } else {
+            let fid = self.get_fid(fh)?;
+            if fid.is_created() {
+                let (parent, filename) = self.disk_cache.pop_created_info(fid.clone()).ok_or(libc::EIO)?;
+                let filepath = self.disk_cache.get_created_path(fid);
+                self.client
+                    .upload(parent.clone(), &filepath, filename)
+                    .map_err(|e| {
+                        // most programs ignore the return value of close()
+                        // so here warn! to notify users of uploading failure
+                        warn!("release() upload failed with: {}", e);
+                        libc::EIO
+                    })?;
+                self.req_update_listing(parent)?;
+                Ok(())
+            } else {
+                // not implemented
+                Err(libc::ENOSYS)
+            }
+        }
+    }
 }
 
 impl RecFs {
@@ -537,7 +562,7 @@ impl RecFs {
                     if let Some(children) = &n.children {
                         for child in children.iter() {
                             if child.name == c.as_os_str().to_string_lossy() {
-                                info!("found in cache: {:?}", child);
+                                debug!("found in cache: {:?}", child);
                                 parent = Some(fid);
                                 fid = child.fid.clone();
                                 is_dir = child.ftype == FileType::Directory;

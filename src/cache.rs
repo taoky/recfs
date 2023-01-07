@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io::Write,
-    path::PathBuf,
+    path::{PathBuf, Path},
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -101,5 +101,14 @@ impl Cache {
             .unwrap()
             .insert(fid.clone(), (parent, name));
         Ok(fid)
+    }
+
+    pub fn pop_created_info(&self, fid: Fid) -> Option<(Fid, String)> {
+        self.create_mapping.lock().unwrap().remove(&fid)
+    }
+
+    pub fn get_created_path(&self, fid: Fid) -> PathBuf {
+        assert!(fid.is_created());
+        self.basepath.join(fid.to_string())
     }
 }

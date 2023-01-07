@@ -8,6 +8,7 @@ pub mod upload;
 
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use binary_macros::base64;
 use fuse_mt::FileType;
@@ -76,7 +77,7 @@ impl Default for RecClient {
     fn default() -> Self {
         Self {
             auth: Arc::new(Mutex::new(RecAuth::default())),
-            client: Client::new(),
+            client: Client::builder().timeout(Duration::from_secs(120)).build().unwrap(),
         }
     }
 }
@@ -92,7 +93,7 @@ impl RecClient {
         token: bool,
         query: &T,
     ) -> anyhow::Result<RecRes<S>> {
-        info!("GET {}?{:?}", path, query);
+        info!("GET {} with query {:?}", path, query);
         let url = format!("{}{}", APIURL, path);
         let mut builder = self.client.get(url);
         if token {
@@ -179,16 +180,14 @@ impl RecClient {
         }
     }
 
-    pub fn put_noretry<S: for<'a> Deserialize<'a> + Default>(
+    pub fn put_upload(
         &self,
-        path: &str,
-        token: bool,
+        url: &str,
         data: Vec<u8>,
-    ) -> anyhow::Result<RecRes<S>> {
-        info!("PUT {}", path);
-        let url = format!("{}{}", APIURL, path);
+    ) -> anyhow::Result<()> {
+        info!("PUT (upload) {}", url);
         let mut builder = self.client.put(url);
-        if token {
+        {
             let auth = self.auth.clone();
             let auth = auth.lock().unwrap();
             builder = builder.header(
@@ -197,29 +196,8 @@ impl RecClient {
             );
         }
         let res = builder.body(data).send()?;
-        let text = res.text()?;
-        debug!("PUT Response: {}", text);
-        let body = serde_json::from_str::<RecRes<S>>(text.trim_start_matches('\u{feff}'))?;
-
-        Ok(body)
-    }
-
-    pub fn put<S: for<'a> Deserialize<'a> + Default>(
-        &self,
-        path: &str,
-        data: Vec<u8>,
-    ) -> anyhow::Result<RecRes<S>> {
-        let res = self.put_noretry(path, true, data.clone())?;
-        if res.status_code == 401 {
-            {
-                let auth = self.auth.clone();
-                let mut auth = auth.lock().unwrap();
-                auth.refresh(self)?;
-            }
-            Ok(self.put_noretry(path, true, data)?)
-        } else {
-            Ok(res)
-        }
+        res.error_for_status()?;
+        Ok(())
     }
 }
 
