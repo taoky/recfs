@@ -1,8 +1,10 @@
 use crate::fs::RecFs;
+use clap::Parser;
 use env_logger::Env;
 use fuse_mt::{mount, FuseMT};
 use std::env;
 use std::ffi::{OsStr, OsString};
+use std::path::PathBuf;
 use std::process::exit;
 
 mod cache;
@@ -11,15 +13,20 @@ mod fid;
 mod fidmap;
 mod fs;
 
+#[derive(Parser)]
+struct Args {
+    #[arg(long, default_value_t = false)]
+    /// Clear keyring item before login
+    clear: bool,
+
+    /// The mountpoint
+    mountpoint: PathBuf,
+}
+
 fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-
-    let args = env::args_os().collect::<Vec<OsString>>();
-    if args.len() != 2 {
-        println!("usage: {} <mountpoint>", env::args().next().unwrap());
-        exit(-1);
-    }
-    let fs = RecFs::new();
+    let cli = Args::parse();
+    let fs = RecFs::new(cli.clear);
     let fuse_args = vec![OsStr::new("-o"), OsStr::new("auto_unmount")];
-    mount(FuseMT::new(fs, 1), &args[1], &fuse_args).unwrap();
+    mount(FuseMT::new(fs, 1), &cli.mountpoint, &fuse_args).unwrap();
 }

@@ -26,3 +26,5 @@ keyring = "1.2.0"
 serde_with = "2.1.0"
 file-lock = "2.1.6"
 rand = "0.8.5"
+urlencoding = "2.1.2"
+clap = { version = "4.0.32", features = ["derive"] }

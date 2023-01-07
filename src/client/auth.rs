@@ -1,4 +1,4 @@
-use std::{convert::TryInto, io::Write};
+use std::{collections::HashMap, convert::TryInto, io::Write};
 
 use libaes::Cipher;
 use log::info;
@@ -48,6 +48,12 @@ struct RecUserAuthRefreshResponse {
 }
 
 static SERVICENAME: &str = "recfs";
+
+#[derive(Debug)]
+pub enum RecAuthMethod {
+    UsernamePassword(String, String),
+    Cookie(String, String),
+}
 
 impl RecAuth {
     pub fn get_tempticket(client: &RecClient) -> anyhow::Result<String> {
@@ -151,15 +157,50 @@ impl RecAuth {
         Ok(())
     }
 
-    pub fn interactive() -> (String, String) {
+    fn parse_cookie(cookie: &str) -> (String, String) {
+        let cookies: HashMap<_, _> = cookie
+            .trim()
+            .trim_matches('"')
+            .split("; ")
+            .map(|x| {
+                let v = x.split_once('=').expect("Unexpected cookie format");
+                (v.0, v.1)
+            })
+            .collect();
+        let auth_token = cookies
+            .get("Rec-Token")
+            .expect("No Rec-Token found in cookie");
+        let refresh_token = cookies
+            .get("Rec-RefreshToken")
+            .expect("No Rec-RefreshToken found in cookie");
+        let refresh_token: serde_json::Value = serde_json::from_str(
+            &urlencoding::decode(refresh_token).expect("Cannot unescape refresh token"),
+        )
+        .expect("Cannot parse refresh token");
+        let refresh_token = refresh_token["refresh_token"]
+            .as_str()
+            .expect("Cannot get refresh token from parsed data");
+        (auth_token.to_owned().to_string(), refresh_token.to_owned())
+    }
+
+    pub fn interactive() -> RecAuthMethod {
+        println!(
+            "By default, your CAS username and password will be sent to https://recapi.ustc.edu.cn"
+        );
+        println!("You can login in browser manually and paste the output of `document.cookie` in Developer Console instead");
         let mut username = String::new();
-        print!("Username: ");
+        print!("Username or cookie: ");
         std::io::stdout().flush().unwrap();
         std::io::stdin().read_line(&mut username).unwrap();
-        print!("Password: ");
-        std::io::stdout().flush().unwrap();
-        let password = read_password().unwrap();
-        (username.trim().to_string(), password)
+        if username.contains("Rec-Token") {
+            let (auth_token, refresh_token) = RecAuth::parse_cookie(&username);
+            RecAuthMethod::Cookie(auth_token, refresh_token)
+        } else {
+            print!("Password: ");
+            std::io::stdout().flush().unwrap();
+            let password = read_password().unwrap();
+            RecAuthMethod::UsernamePassword(username.trim().to_string(), password)
+        }
     }
 
     pub fn try_keyring(&mut self) -> anyhow::Result<()> {
@@ -174,6 +215,12 @@ impl RecAuth {
         let entry = keyring::Entry::new(SERVICENAME, "userauth");
         let userauth_json = serde_json::to_string(&self.token.as_ref().unwrap())?;
         entry.set_password(&userauth_json)?;
+        Ok(())
+    }
+
+    pub fn clear_keyring(&self) -> anyhow::Result<()> {
+        let entry = keyring::Entry::new(SERVICENAME, "userauth");
+        entry.delete_password()?;
         Ok(())
     }
 
@@ -200,5 +247,18 @@ impl RecAuth {
         });
         self.set_keyring()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cookie_parse() {
+        let cookie = r#""Rec-Storage=moss; Rec-Token=aaaaaaabbaaa3aaaaaaaaaaaaaaaaaa1; Rec-RefreshToken={%22refresh_token%22:%22zzzzzzzz22zzzzzzzzzazzzz9zzzzzzz%22%2C%22token_expire_time%22:%222077-11-04%2005:14:19%22}""#;
+        let (auth_token, refresh_token) = RecAuth::parse_cookie(cookie);
+        assert_eq!(auth_token, "aaaaaaabbaaa3aaaaaaaaaaaaaaaaaa1");
+        assert_eq!(refresh_token, "zzzzzzzz22zzzzzzzzzazzzz9zzzzzzz");
     }
 }

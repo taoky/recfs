@@ -1,5 +1,5 @@
 use crate::cache::Cache;
-use crate::client::auth::RecAuth;
+use crate::client::auth::{RecAuth, RecAuthMethod, Token};
 use crate::client::list::RecListItem;
 use crate::client::operation::Operation;
 use crate::client::RecClient;
@@ -28,15 +28,31 @@ pub struct RecFs {
 const BLOCK_SIZE: u32 = 512;
 
 impl RecFs {
-    pub fn new() -> Self {
+    pub fn new(clear: bool) -> Self {
         let mut client = RecClient::default();
         let mut auth = RecAuth::default();
+
+        if clear {
+            if let Err(e) = auth.clear_keyring() {
+                warn!("Failed to clear keyring: {}", e);
+            }
+        }
 
         if let Err(e) = auth.try_keyring() {
             info!("Failed to get auth from keyring: {}", e);
             info!("Try interactive login...");
-            let (username, password) = RecAuth::interactive();
-            auth.login(&client, username, password).unwrap();
+            let authdata = RecAuth::interactive();
+            match authdata {
+                RecAuthMethod::UsernamePassword(username, password) => {
+                    auth.login(&client, username, password).unwrap();
+                }
+                RecAuthMethod::Cookie(access_token, refresh_token) => {
+                    auth.token = Some(Token {
+                        access_token,
+                        refresh_token,
+                    });
+                }
+            }
         }
         client.set_auth(auth);
 
@@ -295,7 +311,10 @@ impl FilesystemMT for RecFs {
             let name_extension = Path::new(name).extension().and_then(OsStr::to_str);
             let newname_extension = Path::new(newname).extension().and_then(OsStr::to_str);
             if name_extension != newname_extension {
-                warn!("rename() move failed: name extension {:?} != newname extension {:?}", name_extension, newname_extension);
+                warn!(
+                    "rename() move failed: name extension {:?} != newname extension {:?}",
+                    name_extension, newname_extension
+                );
                 return Err(libc::ENOSYS);
             }
             // let name_stem = Path::new(name).file_stem().and_then(OsStr::to_str);
