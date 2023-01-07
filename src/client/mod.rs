@@ -4,6 +4,7 @@ pub mod list;
 pub mod mkdir;
 pub mod operation;
 pub mod stat;
+pub mod upload;
 
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
@@ -173,6 +174,49 @@ impl RecClient {
                 auth.refresh(self)?;
             }
             Ok(self.post_noretry(path, true, json, None)?)
+        } else {
+            Ok(res)
+        }
+    }
+
+    pub fn put_noretry<S: for<'a> Deserialize<'a> + Default>(
+        &self,
+        path: &str,
+        token: bool,
+        data: Vec<u8>,
+    ) -> anyhow::Result<RecRes<S>> {
+        info!("PUT {}", path);
+        let url = format!("{}{}", APIURL, path);
+        let mut builder = self.client.put(url);
+        if token {
+            let auth = self.auth.clone();
+            let auth = auth.lock().unwrap();
+            builder = builder.header(
+                "x-auth-token",
+                auth.token.as_ref().unwrap().access_token.as_str(),
+            );
+        }
+        let res = builder.body(data).send()?;
+        let text = res.text()?;
+        debug!("PUT Response: {}", text);
+        let body = serde_json::from_str::<RecRes<S>>(text.trim_start_matches('\u{feff}'))?;
+
+        Ok(body)
+    }
+
+    pub fn put<S: for<'a> Deserialize<'a> + Default>(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+    ) -> anyhow::Result<RecRes<S>> {
+        let res = self.put_noretry(path, true, data.clone())?;
+        if res.status_code == 401 {
+            {
+                let auth = self.auth.clone();
+                let mut auth = auth.lock().unwrap();
+                auth.refresh(self)?;
+            }
+            Ok(self.put_noretry(path, true, data)?)
         } else {
             Ok(res)
         }

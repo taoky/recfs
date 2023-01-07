@@ -7,15 +7,15 @@ use crate::fid::Fid;
 use crate::fidmap::{FidCachedList, FidMap};
 use crate::Args;
 use fuse_mt::{
-    DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo, ResultEntry, ResultOpen,
-    ResultReaddir, ResultStatfs, Statfs,
+    CreatedEntry, DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo, ResultEntry,
+    ResultOpen, ResultReaddir, ResultStatfs, Statfs,
 };
-use libc::O_RDONLY;
+use libc::{O_APPEND, O_CREAT, O_RDONLY};
 use log::{debug, info, warn};
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
@@ -150,16 +150,69 @@ impl FilesystemMT for RecFs {
         })
     }
 
+    fn create(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        _mode: u32,
+        flags: u32,
+    ) -> fuse_mt::ResultCreate {
+        if let Ok(_) = self.req_fid(&parent.join(name)) {
+            return Err(libc::EEXIST);
+        }
+        let (fid, parent_fid) = self.create_in_cache(parent, name)?;
+
+        Ok(CreatedEntry {
+            ttl: Duration::new(1, 0),
+            attr: FileAttr {
+                size: 0,
+                blocks: 0,
+                atime: SystemTime::UNIX_EPOCH,
+                mtime: SystemTime::UNIX_EPOCH,
+                ctime: SystemTime::UNIX_EPOCH,
+                crtime: SystemTime::UNIX_EPOCH,
+                kind: FileType::RegularFile,
+                perm: (libc::S_IRUSR | libc::S_IWUSR) as u16,
+                nlink: 1, // allowing link(2)
+                uid: 0,
+                gid: 0,
+                rdev: 0,
+                flags: 0,
+            },
+            fh: self
+                .fid_map
+                .write()
+                .unwrap()
+                .borrow_mut()
+                .set_fh(&fid, Some(&parent_fid), None),
+            flags,
+        })
+    }
+
     fn open(&self, _req: RequestInfo, path: &Path, flags: u32) -> ResultOpen {
-        let (fid, parent) = self.req_fid(path)?;
-        let item = self.get_item(fid.clone(), parent.clone())?;
-        if item.ftype != FileType::RegularFile {
-            return Err(libc::EISDIR);
+        let fid_res = self.req_fid(path);
+        let (fid, parent) = match fid_res {
+            Ok((fid, parent)) => (fid, parent),
+            Err(_) => {
+                if flags & libc::O_CREAT as u32 == 0 {
+                    return Err(libc::ENOENT);
+                }
+                let parent = path.parent().ok_or(libc::ENOENT)?;
+
+                let (fid, parent_fid) =
+                    self.create_in_cache(parent, path.file_name().ok_or(libc::EINVAL)?)?;
+
+                (fid, Some(parent_fid))
+            }
+        };
+        if !fid.is_created() {
+            let item = self.get_item(fid.clone(), parent.clone())?;
+            if item.ftype != FileType::RegularFile {
+                return Err(libc::EISDIR);
+            }
         }
-        if (flags | O_RDONLY as u32) == 0 {
-            // write mode unimplemented
-            return Err(libc::ENOSYS);
-        }
+
         Ok((
             self.fid_map
                 .write()
@@ -188,6 +241,7 @@ impl FilesystemMT for RecFs {
         };
 
         let mut file = match {
+            // created file are always contained in disk_cache
             match self.disk_cache.contains(fid.clone()) {
                 Some(path) => File::open(path),
                 None => {
@@ -233,6 +287,45 @@ impl FilesystemMT for RecFs {
         }
 
         callback(Ok(&data))
+    }
+
+    fn write(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        fh: u64,
+        offset: u64,
+        data: Vec<u8>,
+        flags: u32,
+    ) -> fuse_mt::ResultWrite {
+        if flags & libc::O_RDONLY as u32 != 0 {
+            return Err(libc::EBADF);
+        }
+
+        let fid = self.get_fid(fh)?;
+
+        let mut file = match self.disk_cache.contains(fid.clone()) {
+            Some(path) => File::create(path),
+            None => {
+                let url = self
+                    .client
+                    .get_download_url(fid.clone())
+                    .map_err(|_| libc::EIO)?;
+
+                self.disk_cache
+                    .fetch(fid.clone(), url)
+                    .map_err(|_| libc::EIO)?;
+                let path = self.disk_cache.contains(fid.clone()).ok_or(libc::EIO)?;
+                File::create(path)
+            }
+        }
+        .map_err(|_| libc::EIO)?;
+
+        file.seek(SeekFrom::Start(offset)).map_err(|_| libc::EIO)?;
+
+        let bytes = file.write(&data).map_err(|_| libc::EIO)?;
+
+        Ok(bytes as u32)
     }
 
     fn mkdir(
@@ -402,6 +495,23 @@ impl FilesystemMT for RecFs {
 }
 
 impl RecFs {
+    fn create_in_cache(
+        &self,
+        parent: &Path,
+        name: &std::ffi::OsStr,
+    ) -> Result<(Fid, Fid), libc::c_int> {
+        let (parent_fid, _) = self.req_fid(parent)?;
+        let fid = self
+            .disk_cache
+            .create(
+                parent_fid.clone(),
+                name.to_str().ok_or(libc::EINVAL)?.to_string(),
+            )
+            .map_err(|_| libc::EIO)?;
+
+        Ok((fid, parent_fid))
+    }
+
     fn delete(&self, parent: &Path, name: &std::ffi::OsStr) -> fuse_mt::ResultEmpty {
         let path = parent.join(name);
         let (fid, parent) = self.req_fid(&path)?;

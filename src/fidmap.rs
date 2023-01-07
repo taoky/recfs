@@ -61,8 +61,9 @@ impl FidMap {
                     }
                     None => {
                         assert!(
-                            self.listing_map.contains_key(&fid)
-                                && self.parent_map.contains_key(&fid)
+                            (self.listing_map.contains_key(&fid)
+                                && self.parent_map.contains_key(&fid))
+                                || (fid.is_created())
                         );
                     }
                 };

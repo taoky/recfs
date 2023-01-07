@@ -1,13 +1,23 @@
-use std::{io::Write, path::PathBuf};
+use std::{
+    collections::HashMap,
+    io::Write,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use file_lock::FileOptions;
-use log::{warn, info};
+use log::{info, warn};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 use crate::fid::Fid;
 
 pub struct Cache {
     basepath: PathBuf,
+    create_counter: AtomicUsize,
+    create_mapping: Arc<Mutex<HashMap<Fid, (Fid, String)>>>,
 }
 
 impl Default for Cache {
@@ -20,7 +30,11 @@ impl Default for Cache {
                 .collect::<String>(),
         );
         Cache::init_path(&basepath);
-        Self { basepath }
+        Self {
+            basepath,
+            create_counter: AtomicUsize::new(0),
+            create_mapping: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -73,5 +87,19 @@ impl Cache {
         // rename
         std::fs::rename(download_path, final_path)?;
         Ok(())
+    }
+
+    pub fn create(&self, parent: Fid, name: String) -> anyhow::Result<Fid> {
+        info!("Cache: Try creating file {} under {}", name, parent);
+        let id = self.create_counter.fetch_add(1, Ordering::SeqCst);
+        let fid_name = format!("{}{}", "write-", id);
+        let path = self.basepath.join(fid_name.clone());
+        std::fs::File::create(path)?;
+        let fid = Fid::from(fid_name);
+        self.create_mapping
+            .lock()
+            .unwrap()
+            .insert(fid.clone(), (parent, name));
+        Ok(fid)
     }
 }

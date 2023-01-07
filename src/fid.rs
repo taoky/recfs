@@ -13,6 +13,10 @@ impl Fid {
             id: "0".to_string(),
         }
     }
+
+    pub fn is_created(&self) -> bool {
+        self.id.starts_with("write")
+    }
 }
 
 impl Display for Fid {
