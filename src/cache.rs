@@ -1,7 +1,7 @@
 use std::{io::Write, path::PathBuf};
 
 use file_lock::FileOptions;
-use log::warn;
+use log::{warn, info};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 use crate::fid::Fid;
@@ -26,7 +26,7 @@ impl Default for Cache {
 
 impl Cache {
     fn init_path(path: &PathBuf) {
-        println!("Cache folder: {}", path.display());
+        info!("Cache folder: {}", path.display());
         if !path.exists() {
             std::fs::create_dir_all(path).unwrap();
         } else {

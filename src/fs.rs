@@ -1,4 +1,3 @@
-use crate::Args;
 use crate::cache::Cache;
 use crate::client::auth::{RecAuth, RecAuthMethod, Token};
 use crate::client::list::RecListItem;
@@ -6,6 +5,7 @@ use crate::client::operation::Operation;
 use crate::client::RecClient;
 use crate::fid::Fid;
 use crate::fidmap::{FidCachedList, FidMap};
+use crate::Args;
 use fuse_mt::{
     DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo, ResultEntry, ResultOpen,
     ResultReaddir, ResultStatfs, Statfs,
@@ -79,7 +79,7 @@ impl From<RecListItem> for FileAttr {
             crtime: SystemTime::UNIX_EPOCH,
             kind: item.ftype,
             perm: (libc::S_IRUSR | libc::S_IWUSR) as u16,
-            nlink: 0,
+            nlink: 1, // allowing link(2)
             uid: 0,
             gid: 0,
             rdev: 0,
@@ -104,7 +104,7 @@ impl FilesystemMT for RecFs {
         let (fid, parent) = self.req_fid(path)?;
         debug!("opendir(): {} {:?}", fid, parent);
         let item = self.get_item(fid.clone(), parent.clone())?;
-        info!("opendir(): Dir opened: {:?}", item);
+        debug!("opendir(): Dir opened: {:?}", item);
         if item.ftype != FileType::Directory {
             return Err(libc::ENOTDIR);
         }
@@ -316,7 +316,7 @@ impl FilesystemMT for RecFs {
             let newname_extension = Path::new(newname).extension().and_then(OsStr::to_str);
             if name_extension != newname_extension {
                 warn!(
-                    "rename() move failed: name extension {:?} != newname extension {:?}",
+                    "rename() (rename) failed: name extension {:?} != newname extension {:?}",
                     name_extension, newname_extension
                 );
                 return Err(libc::ENOSYS);
@@ -339,6 +339,65 @@ impl FilesystemMT for RecFs {
             warn!("rename() does not support when name != newname && parent != newparent");
             Err(libc::ENOSYS)
         }
+    }
+
+    // link() in recfs does not create a hardlink
+    // Instead, it will issue copy operation to server
+    // Due to Linux link(2) limitation (in a normal POSIX fs, we cannot create a hard link for directory),
+    // we cannot use link() here as it does not support linking directory
+    // Also see https://github.com/wfraser/fuse-mt/issues/23
+    fn link(
+        &self,
+        _req: RequestInfo,
+        path: &Path,
+        newparent: &Path,
+        newname: &OsStr,
+    ) -> ResultEntry {
+        debug!(
+            "link() path: {:?}, newparent: {:?}, newname: {:?}",
+            path, newparent, newname
+        );
+        if newname != path.file_name().ok_or(libc::EINVAL)? {
+            warn!("symlink() does not support when name != target.file_name()");
+            return Err(libc::ENOSYS);
+        }
+        let (from_fid, from_parent) = self.req_fid(path)?;
+        let from_item = self.get_item(from_fid.clone(), from_parent.clone())?;
+        let (to_fid, _to_parent) = self.req_fid(newparent)?;
+        self.client
+            .operation(
+                Operation::Copy,
+                from_fid,
+                from_item.ftype,
+                Some(to_fid.to_string()),
+            )
+            .map_err(|_| libc::EIO)?;
+
+        let mut retry = 0;
+        let mut found = None;
+        while retry < 3 {
+            let list = self.req_update_listing(to_fid.clone())?;
+            found = None;
+            let children = list.children.ok_or(libc::ENOTDIR)?;
+            for child in children.iter() {
+                if child.name == newname.to_string_lossy() {
+                    found = Some(child.clone());
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+            warn!("symlink(): Cannot find copied file, retrying...");
+            std::thread::sleep(Duration::new(1, 0));
+            retry += 1;
+        }
+        let found = match found {
+            None => Err(libc::EIO)?,
+            Some(found) => found,
+        };
+
+        Ok((Duration::new(1, 0), found.clone().into()))
     }
 }
 
@@ -384,7 +443,7 @@ impl RecFs {
 
                     if self.fast_path {
                         // file does not exist in cache: stop in fast path
-                        break;
+                        return Err(libc::ENOENT);
                     }
                 }
             }
@@ -488,6 +547,7 @@ impl RecFs {
             .cloned()
     }
 
+    #[allow(dead_code)]
     fn req_item(&self, fid: Fid, parent_fid: Option<Fid>) -> Result<RecListItem, libc::c_int> {
         if let Some(parent_fid) = parent_fid {
             let items = self
