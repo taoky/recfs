@@ -10,7 +10,6 @@ use fuse_mt::{
     CreatedEntry, DirectoryEntry, FileAttr, FileType, FilesystemMT, RequestInfo, ResultEntry,
     ResultOpen, ResultReaddir, ResultStatfs, Statfs,
 };
-use libc::{O_APPEND, O_CREAT, O_RDONLY};
 use log::{debug, info, warn};
 use std::borrow::{Borrow, BorrowMut};
 use std::ffi::{OsStr, OsString};
@@ -158,7 +157,7 @@ impl FilesystemMT for RecFs {
         _mode: u32,
         flags: u32,
     ) -> fuse_mt::ResultCreate {
-        if let Ok(_) = self.req_fid(&parent.join(name)) {
+        if self.req_fid(&parent.join(name)).is_ok() {
             return Err(libc::EEXIST);
         }
         let (fid, parent_fid) = self.create_in_cache(parent, name)?;
@@ -257,7 +256,7 @@ impl FilesystemMT for RecFs {
                         warn!("read() failed when downloading: {}", e);
                         return callback(Err(libc::EIO));
                     }
-                    let path = match self.disk_cache.contains(fid.clone()) {
+                    let path = match self.disk_cache.contains(fid) {
                         Some(path) => path,
                         None => {
                             warn!("read() failed when getting path after downloaded");
@@ -315,7 +314,7 @@ impl FilesystemMT for RecFs {
                 self.disk_cache
                     .fetch(fid.clone(), url)
                     .map_err(|_| libc::EIO)?;
-                let path = self.disk_cache.contains(fid.clone()).ok_or(libc::EIO)?;
+                let path = self.disk_cache.contains(fid).ok_or(libc::EIO)?;
                 File::create(path)
             }
         }
@@ -395,12 +394,12 @@ impl FilesystemMT for RecFs {
             self.client
                 .operation(
                     Operation::Move,
-                    fid.clone(),
+                    fid,
                     item.ftype,
                     Some(newfid.to_string()),
                 )
                 .map_err(|_| libc::EIO)?;
-            self.req_update_listing(parent.unwrap_or(Fid::root()))?;
+            self.req_update_listing(parent.unwrap_or_else(Fid::root))?;
             self.req_update_listing(newfid)?;
             Ok(())
         } else if parent == newparent {
@@ -426,7 +425,7 @@ impl FilesystemMT for RecFs {
             self.client
                 .rename(fid, newname_stem.to_string(), item.ftype)
                 .map_err(|_| libc::EIO)?;
-            self.req_update_listing(parent.unwrap_or(Fid::root()))?;
+            self.req_update_listing(parent.unwrap_or_else(Fid::root))?;
             Ok(())
         } else {
             warn!("rename() does not support when name != newname && parent != newparent");
@@ -455,7 +454,7 @@ impl FilesystemMT for RecFs {
             return Err(libc::ENOSYS);
         }
         let (from_fid, from_parent) = self.req_fid(path)?;
-        let from_item = self.get_item(from_fid.clone(), from_parent.clone())?;
+        let from_item = self.get_item(from_fid.clone(), from_parent)?;
         let (to_fid, _to_parent) = self.req_fid(newparent)?;
         self.client
             .operation(
@@ -490,16 +489,27 @@ impl FilesystemMT for RecFs {
             Some(found) => found,
         };
 
-        Ok((Duration::new(1, 0), found.clone().into()))
+        Ok((Duration::new(1, 0), found.into()))
     }
 
-    fn release(&self, _req: RequestInfo, _path: &Path, fh: u64, flags: u32, _lock_owner: u64, _flush: bool) -> fuse_mt::ResultEmpty {
+    fn release(
+        &self,
+        _req: RequestInfo,
+        _path: &Path,
+        fh: u64,
+        flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+    ) -> fuse_mt::ResultEmpty {
         if flags & libc::O_RDONLY as u32 != 0 {
             Ok(())
         } else {
             let fid = self.get_fid(fh)?;
             if fid.is_created() {
-                let (parent, filename) = self.disk_cache.pop_created_info(fid.clone()).ok_or(libc::EIO)?;
+                let (parent, filename) = self
+                    .disk_cache
+                    .pop_created_info(fid.clone())
+                    .ok_or(libc::EIO)?;
                 let filepath = self.disk_cache.get_created_path(fid);
                 self.client
                     .upload(parent.clone(), &filepath, filename)
@@ -544,7 +554,7 @@ impl RecFs {
         self.client
             .operation(Operation::Delete, fid, item.ftype, None)
             .map_err(|_| libc::EIO)?;
-        self.req_update_listing(parent.unwrap_or(Fid::root()))?;
+        self.req_update_listing(parent.unwrap_or_else(Fid::root))?;
         Ok(())
     }
 
@@ -693,7 +703,7 @@ impl RecFs {
             self.fid_map
                 .write()
                 .unwrap()
-                .get_listing_mut(parent_fid.clone())
+                .get_listing_mut(parent_fid)
                 .children = Some(items.clone());
             Ok(items.into_iter().find(|i| i.fid == fid).unwrap())
         } else {
@@ -706,7 +716,7 @@ impl RecFs {
         self.fid_map
             .write()
             .unwrap()
-            .get_listing_mut(fid.clone())
+            .get_listing_mut(fid)
             .children = Some(items.clone());
         Ok(FidCachedList {
             children: Some(items),

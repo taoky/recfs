@@ -15,7 +15,7 @@ impl RecClient {
         status_check!(resp);
         let url = resp.entity[fid.to_string()]
             .as_str()
-            .ok_or(anyhow::anyhow!(
+            .ok_or_else(|| anyhow::anyhow!(
                 "Failed to get download url for fid: {}",
                 fid
             ))?;

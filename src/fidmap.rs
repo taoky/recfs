@@ -1,7 +1,6 @@
 use crate::{client::list::RecListItem, fid::Fid};
 use bimap::BiBTreeMap;
-use fuse_mt::FileType;
-use std::{collections::HashMap, time::SystemTime};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct FidCachedList {
@@ -30,7 +29,7 @@ impl FidMap {
     }
 
     pub fn get_parent_fid(&self, fid: &Fid) -> Option<Option<Fid>> {
-        self.parent_map.get(&fid).cloned()
+        self.parent_map.get(fid).cloned()
     }
 
     pub fn get_listing(&self, fid: &Fid) -> Option<&FidCachedList> {
@@ -40,7 +39,7 @@ impl FidMap {
     pub fn get_listing_mut(&mut self, fid: Fid) -> &mut FidCachedList {
         self.listing_map
             .entry(fid)
-            .or_insert(FidCachedList::default())
+            .or_default()
     }
 
     pub fn get_parentmap_mut(&mut self) -> &mut HashMap<Fid, Option<Fid>> {
@@ -50,7 +49,7 @@ impl FidMap {
     // set the file handle for a Fid, and return the file handle
     // it will not update maps if file handle exists
     pub fn set_fh(&mut self, fid: &Fid, parent: Option<&Fid>, list: Option<&FidCachedList>) -> u64 {
-        match self.fhmap.get_by_right(&fid) {
+        match self.fhmap.get_by_right(fid) {
             Some(&fh) => fh,
             None => {
                 let fh = self.next_fh();
@@ -61,8 +60,8 @@ impl FidMap {
                     }
                     None => {
                         assert!(
-                            (self.listing_map.contains_key(&fid)
-                                && self.parent_map.contains_key(&fid))
+                            (self.listing_map.contains_key(fid)
+                                && self.parent_map.contains_key(fid))
                                 || (fid.is_created())
                         );
                     }

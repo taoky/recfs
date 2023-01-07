@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io::Write,
-    path::{PathBuf, Path},
+    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
@@ -72,7 +72,7 @@ impl Cache {
     pub fn fetch(&self, fid: Fid, url: String) -> anyhow::Result<()> {
         let download_path = self
             .basepath
-            .join(format!("{}.{}", fid.to_string(), "download"));
+            .join(format!("{}.{}", fid, "download"));
         let final_path = self.basepath.join(fid.to_string());
         let mut download_lock = file_lock::FileLock::lock(
             download_path.clone(),

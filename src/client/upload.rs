@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, io::Read, path::Path};
+use std::{io::Read, path::Path};
 
 use log::{info, warn};
 use serde::Deserialize;
@@ -9,6 +9,7 @@ use crate::{fid::Fid, status_check};
 use super::RecClient;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct RecUploadParam {
     key: String,
     request_type: String,
@@ -26,7 +27,7 @@ impl RecClient {
     ) -> anyhow::Result<()> {
         let filesize = file_path.metadata()?.len();
         let resp = self.get::<_, serde_json::Value>(
-            &format!("file/{}", parent_fid.to_string()),
+            &format!("file/{}", parent_fid),
             &[
                 ("file_name", file_name),
                 ("byte", filesize.to_string()),
@@ -47,7 +48,8 @@ impl RecClient {
 
         for (idx, i) in upload_params.into_iter().enumerate() {
             let mut buffer: Vec<u8> = vec![0; upload_chunk_size as usize];
-            file.read(&mut buffer)?;
+            // TODO: ignore read() amount for now
+            let _ignored = file.read(&mut buffer)?;
             let upload_url = &i[1].value;
             let upload_method = &i[2].value;
             if upload_method != "PUT" {

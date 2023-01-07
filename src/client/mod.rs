@@ -30,7 +30,7 @@ type EmptyQuery = [(String, String); 0];
 macro_rules! status_check {
     ($x: expr) => {
         if $x.status_code != 200 {
-            crate::client::warn!("Get error message from rec: {}", $x.message);
+            $crate::client::warn!("Get error message from rec: {}", $x.message);
             return Err(anyhow::anyhow!(
                 "Status code {}, error message: {}",
                 $x.status_code,
@@ -77,7 +77,10 @@ impl Default for RecClient {
     fn default() -> Self {
         Self {
             auth: Arc::new(Mutex::new(RecAuth::default())),
-            client: Client::builder().timeout(Duration::from_secs(120)).build().unwrap(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .unwrap(),
         }
     }
 }
@@ -180,11 +183,7 @@ impl RecClient {
         }
     }
 
-    pub fn put_upload(
-        &self,
-        url: &str,
-        data: Vec<u8>,
-    ) -> anyhow::Result<()> {
+    pub fn put_upload(&self, url: &str, data: Vec<u8>) -> anyhow::Result<()> {
         info!("PUT (upload) {}", url);
         let mut builder = self.client.put(url);
         {

@@ -46,7 +46,7 @@ impl RecClient {
                     FileType::RegularFile => "file",
                     _ => unreachable!(),
                 }}],
-                "number": if dst_id == "B_0".to_string() { "0".to_string() } else { dst_id }
+                "number": if dst_id == *"B_0" { "0".to_string() } else { dst_id }
             }),
         )?;
         status_check!(resp);

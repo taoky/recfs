@@ -2,10 +2,8 @@ use crate::fs::RecFs;
 use clap::Parser;
 use env_logger::Env;
 use fuse_mt::{mount, FuseMT};
-use std::env;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::process::exit;
 
 mod cache;
 mod client;
