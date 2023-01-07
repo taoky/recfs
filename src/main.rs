@@ -14,19 +14,23 @@ mod fidmap;
 mod fs;
 
 #[derive(Parser)]
-struct Args {
+pub struct Args {
     #[arg(long, default_value_t = false)]
     /// Clear keyring item before login
     clear: bool,
 
     /// The mountpoint
     mountpoint: PathBuf,
+
+    #[arg(long, default_value_t = false)]
+    /// Request server for non-existing files in local tree structure cache
+    no_fast_path: bool,
 }
 
 fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let cli = Args::parse();
-    let fs = RecFs::new(cli.clear);
+    let fs = RecFs::new(&cli);
     let fuse_args = vec![OsStr::new("-o"), OsStr::new("auto_unmount")];
     mount(FuseMT::new(fs, 1), &cli.mountpoint, &fuse_args).unwrap();
 }

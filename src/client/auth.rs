@@ -211,7 +211,7 @@ impl RecAuth {
         Ok(())
     }
 
-    fn set_keyring(&mut self) -> anyhow::Result<()> {
+    pub fn set_keyring(&mut self) -> anyhow::Result<()> {
         let entry = keyring::Entry::new(SERVICENAME, "userauth");
         let userauth_json = serde_json::to_string(&self.token.as_ref().unwrap())?;
         entry.set_password(&userauth_json)?;

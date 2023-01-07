@@ -1,3 +1,4 @@
+use crate::Args;
 use crate::cache::Cache;
 use crate::client::auth::{RecAuth, RecAuthMethod, Token};
 use crate::client::list::RecListItem;
@@ -23,16 +24,17 @@ pub struct RecFs {
     client: RecClient,
     fid_map: Arc<RwLock<FidMap>>,
     disk_cache: Cache,
+    fast_path: bool,
 }
 
 const BLOCK_SIZE: u32 = 512;
 
 impl RecFs {
-    pub fn new(clear: bool) -> Self {
+    pub fn new(args: &Args) -> Self {
         let mut client = RecClient::default();
         let mut auth = RecAuth::default();
 
-        if clear {
+        if args.clear {
             if let Err(e) = auth.clear_keyring() {
                 warn!("Failed to clear keyring: {}", e);
             }
@@ -51,6 +53,7 @@ impl RecFs {
                         access_token,
                         refresh_token,
                     });
+                    auth.set_keyring().unwrap();
                 }
             }
         }
@@ -60,6 +63,7 @@ impl RecFs {
             client,
             fid_map: Arc::new(RwLock::new(FidMap::new())),
             disk_cache: Cache::default(),
+            fast_path: !args.no_fast_path,
         }
     }
 }
@@ -376,6 +380,11 @@ impl RecFs {
 
                     if found {
                         continue;
+                    }
+
+                    if self.fast_path {
+                        // file does not exist in cache: stop in fast path
+                        break;
                     }
                 }
             }
