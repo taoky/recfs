@@ -44,12 +44,14 @@ impl RecClient {
 
         let upload_params: RecUploadParams = serde_json::from_value(resp["upload_params"].clone())?;
 
-        let mut file = std::fs::File::open(file_path)?;
+        let file = std::fs::File::open(file_path)?;
 
         for (idx, i) in upload_params.into_iter().enumerate() {
-            let mut buffer: Vec<u8> = vec![0; upload_chunk_size as usize];
-            // TODO: ignore read() amount for now
-            let _ignored = file.read(&mut buffer)?;
+            let mut buffer: Vec<u8> = Vec::new();
+            let mut file_partial = file.try_clone()?.take(upload_chunk_size as u64);
+            let size = file_partial.read_to_end(&mut buffer)?;
+            buffer.resize(size, 0);
+
             let upload_url = &i[1].value;
             let upload_method = &i[2].value;
             if upload_method != "PUT" {

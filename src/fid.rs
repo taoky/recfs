@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Debug)]
 enum FidValue {
     Root,
-    UUID(Uuid),
+    Uuid(Uuid),
     BackupRoot,
     RecycleRoot,
     Write(usize),
@@ -24,21 +24,18 @@ impl Fid {
     }
 
     pub fn is_created(&self) -> bool {
-        match self.id {
-            FidValue::Write(_) => true,
-            _ => false,
-        }
+        matches!(self.id, FidValue::Write(_))
     }
 }
 
 impl Display for Fid {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self.id {
-            FidValue::Root => return f.write_str("0"),
-            FidValue::BackupRoot => return f.write_str("B_0"),
-            FidValue::RecycleRoot => return f.write_str("R_0"),
-            FidValue::Write(id) => return f.write_fmt(format_args!("write-{}", id)),
-            FidValue::UUID(uid) => return f.write_str(&uid.to_string()),
+            FidValue::Root => f.write_str("0"),
+            FidValue::BackupRoot => f.write_str("B_0"),
+            FidValue::RecycleRoot => f.write_str("R_0"),
+            FidValue::Write(id) => f.write_fmt(format_args!("write-{}", id)),
+            FidValue::Uuid(uid) => f.write_str(&uid.to_string()),
         }
     }
 }
@@ -49,9 +46,9 @@ impl FromStr for Fid {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Uuid::parse_str(s) {
             Ok(id) => Ok(Self {
-                id: FidValue::UUID(id),
+                id: FidValue::Uuid(id),
             }),
-            Err(e) => match s {
+            Err(_e) => match s {
                 "0" => Ok(Self { id: FidValue::Root }),
                 "B_0" => Ok(Self {
                     id: FidValue::BackupRoot,

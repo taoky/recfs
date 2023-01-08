@@ -102,7 +102,7 @@ impl FilesystemMT for RecFs {
     fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
         let (fid, parent) = self.req_fid(path)?;
         debug!("opendir(): {} {:?}", fid, parent);
-        let item = self.get_item(fid.clone(), parent.clone())?;
+        let item = self.get_item(fid, parent)?;
         debug!("opendir(): Dir opened: {:?}", item);
         if item.ftype != FileType::Directory {
             return Err(libc::ENOTDIR);
@@ -206,7 +206,7 @@ impl FilesystemMT for RecFs {
             }
         };
         if !fid.is_created() {
-            let item = self.get_item(fid.clone(), parent.clone())?;
+            let item = self.get_item(fid, parent)?;
             if item.ftype != FileType::RegularFile {
                 return Err(libc::EISDIR);
             }
@@ -241,10 +241,10 @@ impl FilesystemMT for RecFs {
 
         let mut file = match {
             // created file are always contained in disk_cache
-            match self.disk_cache.contains(fid.clone()) {
+            match self.disk_cache.contains(fid) {
                 Some(path) => File::open(path),
                 None => {
-                    let url = self.client.get_download_url(fid.clone());
+                    let url = self.client.get_download_url(fid);
                     let url = match url {
                         Ok(url) => url,
                         Err(e) => {
@@ -252,7 +252,7 @@ impl FilesystemMT for RecFs {
                             return callback(Err(libc::EIO));
                         }
                     };
-                    if let Err(e) = self.disk_cache.fetch(fid.clone(), url) {
+                    if let Err(e) = self.disk_cache.fetch(fid, url) {
                         warn!("read() failed when downloading: {}", e);
                         return callback(Err(libc::EIO));
                     }
@@ -303,17 +303,12 @@ impl FilesystemMT for RecFs {
 
         let fid = self.get_fid(fh)?;
 
-        let mut file = match self.disk_cache.contains(fid.clone()) {
+        let mut file = match self.disk_cache.contains(fid) {
             Some(path) => File::create(path),
             None => {
-                let url = self
-                    .client
-                    .get_download_url(fid.clone())
-                    .map_err(|_| libc::EIO)?;
+                let url = self.client.get_download_url(fid).map_err(|_| libc::EIO)?;
 
-                self.disk_cache
-                    .fetch(fid.clone(), url)
-                    .map_err(|_| libc::EIO)?;
+                self.disk_cache.fetch(fid, url).map_err(|_| libc::EIO)?;
                 let path = self.disk_cache.contains(fid).ok_or(libc::EIO)?;
                 File::create(path)
             }
@@ -336,7 +331,7 @@ impl FilesystemMT for RecFs {
     ) -> ResultEntry {
         let (fid, _parent) = self.req_fid(parent)?;
         self.client
-            .mkdir(fid.clone(), name.to_str().ok_or(libc::EINVAL)?.to_string())
+            .mkdir(fid, name.to_str().ok_or(libc::EINVAL)?.to_string())
             .map_err(|_| libc::EIO)?;
         let list = self.req_update_listing(fid)?;
         let mut found = None;
@@ -389,15 +384,10 @@ impl FilesystemMT for RecFs {
             }
             let path = parent.join(name);
             let (fid, parent) = self.req_fid(&path)?;
-            let item = self.get_item(fid.clone(), parent.clone())?;
+            let item = self.get_item(fid, parent)?;
             let (newfid, _newparent) = self.req_fid(newparent)?;
             self.client
-                .operation(
-                    Operation::Move,
-                    fid,
-                    item.ftype,
-                    Some(newfid.to_string()),
-                )
+                .operation(Operation::Move, fid, item.ftype, Some(newfid.to_string()))
                 .map_err(|_| libc::EIO)?;
             self.req_update_listing(parent.unwrap_or_else(Fid::root))?;
             self.req_update_listing(newfid)?;
@@ -421,7 +411,7 @@ impl FilesystemMT for RecFs {
 
             let path = parent.join(name);
             let (fid, parent) = self.req_fid(&path)?;
-            let item = self.get_item(fid.clone(), parent.clone())?;
+            let item = self.get_item(fid, parent)?;
             self.client
                 .rename(fid, newname_stem.to_string(), item.ftype)
                 .map_err(|_| libc::EIO)?;
@@ -454,7 +444,7 @@ impl FilesystemMT for RecFs {
             return Err(libc::ENOSYS);
         }
         let (from_fid, from_parent) = self.req_fid(path)?;
-        let from_item = self.get_item(from_fid.clone(), from_parent)?;
+        let from_item = self.get_item(from_fid, from_parent)?;
         let (to_fid, _to_parent) = self.req_fid(newparent)?;
         self.client
             .operation(
@@ -468,7 +458,7 @@ impl FilesystemMT for RecFs {
         let mut retry = 0;
         let mut found = None;
         while retry < 3 {
-            let list = self.req_update_listing(to_fid.clone())?;
+            let list = self.req_update_listing(to_fid)?;
             found = None;
             let children = list.children.ok_or(libc::ENOTDIR)?;
             for child in children.iter() {
@@ -506,13 +496,10 @@ impl FilesystemMT for RecFs {
         } else {
             let fid = self.get_fid(fh)?;
             if fid.is_created() {
-                let (parent, filename) = self
-                    .disk_cache
-                    .pop_created_info(fid.clone())
-                    .ok_or(libc::EIO)?;
+                let (parent, filename) = self.disk_cache.pop_created_info(fid).ok_or(libc::EIO)?;
                 let filepath = self.disk_cache.get_created_path(fid);
                 self.client
-                    .upload(parent.clone(), &filepath, filename)
+                    .upload(parent, &filepath, filename)
                     .map_err(|e| {
                         // most programs ignore the return value of close()
                         // so here warn! to notify users of uploading failure
@@ -538,10 +525,7 @@ impl RecFs {
         let (parent_fid, _) = self.req_fid(parent)?;
         let fid = self
             .disk_cache
-            .create(
-                parent_fid.clone(),
-                name.to_str().ok_or(libc::EINVAL)?.to_string(),
-            )
+            .create(parent_fid, name.to_str().ok_or(libc::EINVAL)?.to_string())
             .map_err(|_| libc::EIO)?;
 
         Ok((fid, parent_fid))
@@ -550,7 +534,7 @@ impl RecFs {
     fn delete(&self, parent: &Path, name: &std::ffi::OsStr) -> fuse_mt::ResultEmpty {
         let path = parent.join(name);
         let (fid, parent) = self.req_fid(&path)?;
-        let item = self.get_item(fid.clone(), parent.clone())?;
+        let item = self.get_item(fid, parent)?;
         self.client
             .operation(Operation::Delete, fid, item.ftype, None)
             .map_err(|_| libc::EIO)?;
@@ -574,7 +558,7 @@ impl RecFs {
                             if child.name == c.as_os_str().to_string_lossy() {
                                 debug!("found in cache: {:?}", child);
                                 parent = Some(fid);
-                                fid = child.fid.clone();
+                                fid = child.fid;
                                 is_dir = child.ftype == FileType::Directory;
                                 found = true;
                                 break;
@@ -595,23 +579,23 @@ impl RecFs {
 
             // not found in cache, request from server now
             info!("not found in cache: {:?}", c);
-            let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
+            let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
             // Update listing
             {
                 let mut map = self.fid_map.write().unwrap();
-                let mut node = map.borrow_mut().get_listing_mut(fid.clone());
+                let mut node = map.borrow_mut().get_listing_mut(fid);
                 node.children = Some(items.clone());
                 for child in items.iter() {
                     map.borrow_mut()
                         .get_parentmap_mut()
-                        .insert(child.fid.clone(), Some(fid.clone()));
+                        .insert(child.fid, Some(fid));
                 }
             }
             let s = c.as_os_str().to_string_lossy();
             match items.iter().find(|i| i.name == s) {
                 Some(item) => {
                     parent = Some(fid);
-                    fid = item.fid.clone();
+                    fid = item.fid;
                     is_dir = item.ftype == FileType::Directory;
                 }
                 None => return Err(libc::ENOENT),
@@ -631,7 +615,7 @@ impl RecFs {
         );
         if !is_in_fidmap {
             if is_dir {
-                let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
+                let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
                 self.fid_map.write().unwrap().borrow_mut().update_fid(
                     &fid,
                     parent.as_ref(),
@@ -695,10 +679,7 @@ impl RecFs {
     #[allow(dead_code)]
     fn req_item(&self, fid: Fid, parent_fid: Option<Fid>) -> Result<RecListItem, libc::c_int> {
         if let Some(parent_fid) = parent_fid {
-            let items = self
-                .client
-                .list(parent_fid.clone())
-                .map_err(|_| libc::ENOENT)?;
+            let items = self.client.list(parent_fid).map_err(|_| libc::ENOENT)?;
             // update listing
             self.fid_map
                 .write()
@@ -712,12 +693,8 @@ impl RecFs {
     }
 
     fn req_update_listing(&self, fid: Fid) -> Result<FidCachedList, libc::c_int> {
-        let items = self.client.list(fid.clone()).map_err(|_| libc::ENOENT)?;
-        self.fid_map
-            .write()
-            .unwrap()
-            .get_listing_mut(fid)
-            .children = Some(items.clone());
+        let items = self.client.list(fid).map_err(|_| libc::ENOENT)?;
+        self.fid_map.write().unwrap().get_listing_mut(fid).children = Some(items.clone());
         Ok(FidCachedList {
             children: Some(items),
         })
