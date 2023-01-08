@@ -120,7 +120,7 @@ impl RecClient {
                 bytes: 0,
                 name: "?Backup".to_string(),
                 hash: None,
-                fid: "B_0".to_string().into(),
+                fid: "B_0".parse()?,
                 ftype: FileType::Directory,
                 time_updated: SystemTime::UNIX_EPOCH,
             });
@@ -128,7 +128,7 @@ impl RecClient {
                 bytes: 0,
                 name: "?Recycle".to_string(),
                 hash: None,
-                fid: "R_0".to_string().into(),
+                fid: "R_0".parse()?,
                 ftype: FileType::Directory,
                 time_updated: SystemTime::UNIX_EPOCH,
             });

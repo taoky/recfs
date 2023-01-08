@@ -95,7 +95,7 @@ impl Cache {
         let fid_name = format!("{}{}", "write-", id);
         let path = self.basepath.join(fid_name.clone());
         std::fs::File::create(path)?;
-        let fid = Fid::from(fid_name);
+        let fid: Fid = fid_name.parse()?;
         self.create_mapping
             .lock()
             .unwrap()
