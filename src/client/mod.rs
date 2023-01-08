@@ -14,7 +14,7 @@ use binary_macros::base64;
 use fuse_mt::FileType;
 use log::{debug, info, warn};
 use reqwest::blocking::Client;
-use reqwest::header::{CONTENT_LENGTH, USER_AGENT};
+// use reqwest::header::{CONTENT_LENGTH, USER_AGENT};
 use serde::Deserializer;
 use serde::{Deserialize, Serialize};
 
@@ -195,11 +195,11 @@ impl RecClient {
                 auth.token.as_ref().unwrap().access_token.as_str(),
             );
         }
-        let len = data.len();
+        // let len = data.len();
         let res = builder
             .body(data)
-            .header(USER_AGENT, "recfs (FUSE implementation)")
-            .header(CONTENT_LENGTH, len.to_string())
+            // .header(USER_AGENT, "recfs (FUSE implementation)")
+            // .header(CONTENT_LENGTH, len.to_string())
             .send()?;
         res.error_for_status()?;
         Ok(())
