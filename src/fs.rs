@@ -58,6 +58,10 @@ impl RecFs {
         }
         client.set_auth(auth);
 
+        // test if it is a valid auth
+        let result = client.stat();
+        result.expect("Failed to stat root directory. If you see this message, please run `recfs --clear` to clear keyring item.");
+
         Self {
             client,
             fid_map: Arc::new(RwLock::new(FidMap::new())),
