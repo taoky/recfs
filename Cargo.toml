@@ -14,7 +14,7 @@ serde_json = "1"
 anyhow = "1"
 bimap = "0.6"
 libc = "0.2"
-chrono = "0.4"
+time = { version = "0.3", features = ["macros", "parsing"] }
 binary_macros = "1.0.0"
 libaes = "0.6.4"
 base64 = "0.20.0"

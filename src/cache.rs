@@ -80,7 +80,7 @@ impl Cache {
         if final_path.exists() {
             return Ok(());
         }
-        let mut resp = reqwest::blocking::get(&url)?;
+        let mut resp = reqwest::blocking::get(url)?;
         std::io::copy(&mut resp, &mut download_lock.file)?;
         // rename
         std::fs::rename(download_path, final_path)?;

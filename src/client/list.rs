@@ -2,14 +2,15 @@ use super::{filename, RecClient};
 use crate::client::filetype;
 use crate::fid::Fid;
 use crate::status_check;
-use chrono::prelude::*;
 use fuse_mt::FileType;
 use log::debug;
 use serde::Deserialize;
 use serde_json::Value;
 use std::convert::TryFrom;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
+use time::macros::{format_description, offset};
+use time::PrimitiveDateTime;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct RecListEntity {
@@ -58,10 +59,12 @@ impl TryFrom<RecListData> for RecListItem {
     type Error = anyhow::Error;
 
     fn try_from(data: RecListData) -> Result<Self, Self::Error> {
-        let time = FixedOffset::west_opt(8)
-            .unwrap()
-            .datetime_from_str(data.last_update_date.as_str(), "%Y-%m-%d %H:%M:%S")?
-            .naive_utc();
+        let time = PrimitiveDateTime::parse(
+            data.last_update_date.as_str(),
+            format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"),
+        )
+        .unwrap()
+        .assume_offset(offset!(+8:00));
         Ok(Self {
             bytes: match data.bytes {
                 Value::String(_) => 0,
@@ -76,11 +79,7 @@ impl TryFrom<RecListData> for RecListItem {
             },
             fid: Fid::from_str(data.number.as_str())?,
             ftype: filetype(data.ftype.as_str())?,
-            time_updated: SystemTime::UNIX_EPOCH
-                + Duration::new(
-                    time.timestamp() as u64,
-                    time.timestamp_subsec_nanos() as u32,
-                ),
+            time_updated: time.into(),
         })
     }
 }
