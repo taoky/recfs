@@ -587,7 +587,7 @@ impl RecFs {
             // Update listing
             {
                 let mut map = self.fid_map.write().unwrap();
-                let mut node = map.borrow_mut().get_listing_mut(fid);
+                let node = map.borrow_mut().get_listing_mut(fid);
                 node.children = Some(items.clone());
                 for child in items.iter() {
                     map.borrow_mut()
