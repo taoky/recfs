@@ -69,4 +69,17 @@ impl RecClient {
         status_check!(resp);
         Ok(())
     }
+
+    // https://github.com/taoky/reccli/issues/1
+    pub fn rename_ext(&self, id: Fid, new_name: String) -> anyhow::Result<()> {
+        let resp = self.post::<_, serde_json::Value>(
+            "rename_ext",
+            &json!({
+                "name": new_name,
+                "number": id.to_string(),
+            })
+        )?;
+        status_check!(resp);
+        Ok(())
+    }
 }

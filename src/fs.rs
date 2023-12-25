@@ -397,28 +397,27 @@ impl FilesystemMT for RecFs {
             self.req_update_listing(newfid)?;
             Ok(())
         } else if parent == newparent {
-            // rename operation
-            let name_extension = Path::new(name).extension().and_then(OsStr::to_str);
-            let newname_extension = Path::new(newname).extension().and_then(OsStr::to_str);
-            if name_extension != newname_extension {
-                warn!(
-                    "rename() (rename) failed: name extension {:?} != newname extension {:?}",
-                    name_extension, newname_extension
-                );
-                return Err(libc::ENOSYS);
-            }
-            // let name_stem = Path::new(name).file_stem().and_then(OsStr::to_str);
-            let newname_stem = Path::new(newname)
-                .file_stem()
-                .and_then(OsStr::to_str)
-                .ok_or(libc::EINVAL)?;
-
             let path = parent.join(name);
             let (fid, parent) = self.req_fid(&path)?;
             let item = self.get_item(fid, parent)?;
-            self.client
-                .rename(fid, newname_stem.to_string(), item.ftype)
-                .map_err(|_| libc::EIO)?;
+            let newname = newname.to_str().ok_or(libc::EINVAL)?;
+            match item.ftype {
+                FileType::Directory => {
+                    self.client
+                        .rename(fid, newname.to_string(), item.ftype)
+                        .map_err(|_| libc::EIO)?;
+                }
+                FileType::RegularFile => {
+                    self.client
+                        .rename_ext(fid, newname.to_string())
+                        .map_err(|_| libc::EIO)?;
+                }
+                _ => {
+                    warn!("rename() does not support renaming other file types");
+                    return Err(libc::ENOSYS);
+                }
+            }
+
             self.req_update_listing(parent.unwrap_or_else(Fid::root))?;
             Ok(())
         } else {
